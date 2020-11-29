@@ -1,55 +1,31 @@
-use log::debug;
-use vte::Perform;
+use vte::{Params, Perform};
 
-use crate::terminal::event::{Event, MouseEvent};
+use crate::terminal::event::MouseEvent;
 use crate::terminal::Terminal;
 
-impl Perform for Terminal {
+impl<'a> Perform for Terminal<'a> {
     fn print(&mut self, c: char) {
-        debug!("print {}", c);
-
-        self.publish(Event::KeyboardEvent(c));
+        self.event_handler.keyboard_input(c);
     }
 
     fn execute(&mut self, byte: u8) {
-        debug!("execute {}", byte);
+        // Handle ^D.
+        if byte == 4 {
+            self.terminated = true;
+        }
+    }
 
-        match byte {
-                3 | 4 => self.terminated = true,
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
+        match (action, intermediates) {
+            // Handle mouse events.
+            ('M', [b'<']) | ('m', [b'<']) => {
+                let params: Vec<u16> = params.into_iter().flatten().copied().collect();
+                if params.len() >= 3 {
+                    let event = MouseEvent::new(params[0], params[1], params[2], action);
+                    self.event_handler.mouse_input(event);
+                }
+            },
             _ => (),
         }
-    }
-
-    fn hook(&mut self, params: &[i64], intermediates: &[u8], ignore: bool, action: char) {
-        debug!("hook {:?} {:?} {} {}", params, intermediates, ignore, action);
-    }
-
-    fn put(&mut self, byte: u8) {
-        debug!("put {}", byte);
-    }
-
-    fn unhook(&mut self) {
-        debug!("unhook");
-    }
-
-    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
-        debug!("osc {:?} {}", params, bell_terminated);
-    }
-
-    fn csi_dispatch(&mut self, params: &[i64], intermediates: &[u8], ignore: bool, action: char) {
-        debug!("csi {:?} {:?} {} {}", params, intermediates, ignore, action);
-
-        let event = match (action, intermediates) {
-            ('M', [b'<']) | ('m', [b'<']) => MouseEvent::new(params, action),
-            _ => None,
-        };
-
-        if let Some(event) = event {
-            self.publish(event);
-        }
-    }
-
-    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-        debug!("esc {:?} {} {}", intermediates, ignore, byte);
     }
 }
