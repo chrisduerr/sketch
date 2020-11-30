@@ -14,31 +14,11 @@ fn main() -> io::Result<()> {
     Sketch::new().run()
 }
 
-/// Coordinate in the terminal grid.
-#[derive(Default, Copy, Clone)]
-struct Point {
-    column: usize,
-    line: usize,
-}
-
 /// Sketch application state.
+#[derive(Default)]
 struct Sketch {
-    cursor_position: Point,
     content: Vec<Vec<char>>,
-
-    cursor: Vec<Vec<char>>,
-    cursor_size: u8,
-}
-
-impl Default for Sketch {
-    fn default() -> Self {
-        Self {
-            cursor_position: Default::default(),
-            content: Default::default(),
-            cursor: Self::create_cursor(1, '+'),
-            cursor_size: 1,
-        }
-    }
+    brush: Brush,
 }
 
 impl Sketch {
@@ -65,7 +45,7 @@ impl Sketch {
 
     /// Move terminal cursor.
     fn goto(&mut self, column: usize, line: usize) {
-        self.cursor_position = Point { column, line };
+        self.brush.position = Point { column, line };
         Terminal::goto(column, line);
     }
 
@@ -77,28 +57,28 @@ impl Sketch {
     fn write(&mut self, c: char, persist: bool) {
         // Store character in the grid state.
         if persist {
-            let Point { column, line } = self.cursor_position;
+            let Point { column, line } = self.brush.position;
             *self.content.get_or_insert(line - 1).get_or_insert(column - 1) = c;
         }
 
         // Write to the terminal.
-        self.cursor_position.column += 1;
+        self.brush.position.column += 1;
         Terminal::write(c);
     }
 
     /// Write the cursor's content at its current location.
     fn write_cursor(&mut self, mode: CursorWriteMode) {
-        let cursor_position = self.cursor_position;
+        let cursor_position = self.brush.position;
 
         // Find the top left corner of the cursor.
-        let origin_column = cursor_position.column as isize - (self.cursor_size as isize - 1);
-        let origin_line = cursor_position.line as isize - (self.cursor_size as isize - 1);
+        let origin_column = cursor_position.column as isize - (self.brush.size as isize - 1);
+        let origin_line = cursor_position.line as isize - (self.brush.size as isize - 1);
 
         // Write the cursor characters.
-        for line in 0..self.cursor.len() {
+        for line in 0..self.brush.template.len() {
             let target_line = origin_line + line as isize;
             let skip = usize::try_from(origin_column * -1 + 1).unwrap_or_default();
-            let first_occupied = self.cursor[line].iter().skip(skip).position(|c| *c != '\0');
+            let first_occupied = self.brush.template[line].iter().skip(skip).position(|b| *b);
 
             // Skip this line if there is no occupied cell within the grid.
             let first_occupied = match first_occupied {
@@ -110,18 +90,17 @@ impl Sketch {
             let first_column = origin_column + first_occupied as isize;
             self.goto(first_column as usize, target_line as usize);
 
-            for column in first_occupied..self.cursor[line].len() {
+            for column in first_occupied..self.brush.template[line].len() {
                 let target_column = origin_column + column as isize;
-                let c = self.cursor[line][column];
 
                 // Stop once we've reached the end of the current line.
-                if c == '\0' {
+                if !self.brush.template[line][column] {
                     break;
                 }
 
                 match mode {
-                    CursorWriteMode::WriteVolatile => self.write(c, false),
-                    CursorWriteMode::Write => self.write(c, true),
+                    CursorWriteMode::WriteVolatile => self.write(self.brush.glyph, false),
+                    CursorWriteMode::Write => self.write(self.brush.glyph, true),
                     CursorWriteMode::Erase => self.write(' ', true),
                     CursorWriteMode::Reset => {
                         let c = *self
@@ -142,40 +121,6 @@ impl Sketch {
         // Restore cursor position.
         self.goto(cursor_position.column, cursor_position.line);
     }
-
-    /// Create a new cursor with the specified size.
-    ///
-    /// The cursor will always be diamond shaped, for a cursor of size 2 using the character `+`,
-    /// the resulting vector would look like this:
-    ///
-    /// ```
-    ///   +
-    ///  +++
-    /// +++++
-    ///  +++
-    ///   +
-    /// ```
-    fn create_cursor(size: u8, c: char) -> Vec<Vec<char>> {
-        let width = size as usize * 2 - 1;
-        let mut cursor = vec![vec!['\0'; width]; width];
-
-        let mut num_chars = 1;
-        for line in 0..width {
-            let start = width / 2 - num_chars / 2;
-
-            for column in start..(start + num_chars) {
-                cursor[line][column] = c;
-            }
-
-            if line < width / 2 {
-                num_chars += 2;
-            } else {
-                num_chars = num_chars.saturating_sub(2);
-            }
-        }
-
-        cursor
-    }
 }
 
 impl EventHandler for Sketch {
@@ -194,12 +139,12 @@ impl EventHandler for Sketch {
             MouseButton::Left => self.write_cursor(CursorWriteMode::Write),
             MouseButton::Right => self.write_cursor(CursorWriteMode::Erase),
             MouseButton::Index(4) if event.modifiers.contains(Modifiers::CONTROL) => {
-                self.cursor_size += 1;
-                self.cursor = Self::create_cursor(self.cursor_size, '+');
+                self.brush.size += 1;
+                self.brush.template = Brush::create_template(self.brush.size);
             },
             MouseButton::Index(5) if event.modifiers.contains(Modifiers::CONTROL) => {
-                self.cursor_size = max(1, self.cursor_size - 1);
-                self.cursor = Self::create_cursor(self.cursor_size, '+');
+                self.brush.size = max(1, self.brush.size - 1);
+                self.brush.template = Brush::create_template(self.brush.size);
             },
             _ => (),
         }
@@ -256,18 +201,6 @@ impl Drop for Sketch {
     }
 }
 
-/// Modes for writing text using the mouse cursor.
-enum CursorWriteMode {
-    /// Write the cursor without storing the result.
-    WriteVolatile,
-    /// Write the cursor.
-    Write,
-    /// Write the cursor as whitespace.
-    Erase,
-    /// Reset the cursor to the grid's content.
-    Reset,
-}
-
 trait GetOrInsert<T> {
     fn get_or_insert(&mut self, index: usize) -> &mut T;
 }
@@ -285,6 +218,82 @@ impl<T: Default> GetOrInsert<T> for Vec<T> {
     }
 }
 
+/// Modes for writing text using the mouse cursor.
+enum CursorWriteMode {
+    /// Write the cursor without storing the result.
+    WriteVolatile,
+    /// Write the cursor.
+    Write,
+    /// Write the cursor as whitespace.
+    Erase,
+    /// Reset the cursor to the grid's content.
+    Reset,
+}
+
+/// Coordinate in the terminal grid.
+#[derive(Default, Copy, Clone)]
+struct Point {
+    column: usize,
+    line: usize,
+}
+
+/// Drawing brush.
+struct Brush {
+    template: Vec<Vec<bool>>,
+    position: Point,
+    glyph: char,
+    size: u8,
+}
+
+impl Default for Brush {
+    fn default() -> Self {
+        Self {
+            template: Self::create_template(1),
+            position: Default::default(),
+            glyph: '+',
+            size: 1,
+        }
+    }
+}
+
+impl Brush {
+    /// Create a new brush template.
+    ///
+    /// The brush will always be diamond shaped, the resulting template is a matrix that stores
+    /// `true` for every cell that contains a brush glyph and `false` for all empty cells.
+    ///
+    /// A brush with size 3 might look like this (`+`: `true`, `-`: `false`):
+    ///
+    /// ```
+    /// --+--
+    /// -+++-
+    /// +++++
+    /// -+++-
+    /// --+--
+    /// ```
+    fn create_template(size: u8) -> Vec<Vec<bool>> {
+        let width = size as usize * 2 - 1;
+        let mut cursor = vec![vec![false; width]; width];
+
+        let mut num_chars = 1;
+        for line in 0..width {
+            let start = width / 2 - num_chars / 2;
+
+            for column in start..(start + num_chars) {
+                cursor[line][column] = true;
+            }
+
+            if line < width / 2 {
+                num_chars += 2;
+            } else {
+                num_chars = num_chars.saturating_sub(2);
+            }
+        }
+
+        cursor
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,23 +301,23 @@ mod tests {
     #[test]
     #[rustfmt::skip]
     fn cursor() {
-        let cursor = Sketch::create_cursor(1, '+');
-        assert_eq!(cursor, vec![vec!['+']]);
+        let cursor = Brush::create_template(1);
+        assert_eq!(cursor, vec![vec![true]]);
 
-        let cursor = Sketch::create_cursor(2, '+');
+        let cursor = Brush::create_template(2);
         assert_eq!(cursor, vec![
-            vec!['\0', '+', '\0'],
-            vec![ '+', '+',  '+'],
-            vec!['\0', '+', '\0'],
+            vec![false, true, false],
+            vec![true,  true, true ],
+            vec![false, true, false],
         ]);
 
-        let cursor = Sketch::create_cursor(3, 'x');
+        let cursor = Brush::create_template(3);
         assert_eq!(cursor, vec![
-            vec!['\0', '\0', 'x', '\0', '\0'],
-            vec!['\0',  'x', 'x',  'x', '\0'],
-            vec![ 'x',  'x', 'x',  'x',  'x'],
-            vec!['\0',  'x', 'x',  'x', '\0'],
-            vec!['\0', '\0', 'x', '\0', '\0'],
+            vec![false, false, true, false, false],
+            vec![false, true,  true, true,  false],
+            vec![true,  true,  true, true,  true ],
+            vec![false, true,  true, true,  false],
+            vec![false, false, true, false, false],
         ]);
     }
 }

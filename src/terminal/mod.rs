@@ -41,7 +41,6 @@ pub struct Terminal<'a> {
     // handler which allows adding a handler for the same signal in the future:
     //
     // https://github.com/vorner/signal-hook/issues/30
-    //
     /// SIGTSTP signal handler action.
     signal_handler: Option<libc::sighandler_t>,
 }
