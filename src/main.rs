@@ -8,7 +8,7 @@ use std::io;
 use unicode_width::UnicodeWidthChar;
 
 use crate::terminal::event::{EventHandler, Modifiers, MouseButton, MouseEvent};
-use crate::terminal::{Terminal, TerminalMode};
+use crate::terminal::{Dimensions, Terminal, TerminalMode};
 
 fn main() -> io::Result<()> {
     Sketch::new().run()
@@ -28,8 +28,8 @@ impl Sketch {
     }
 
     /// Run the terminal event loop.
-    fn run(&mut self) -> io::Result<()> {
-        let mut terminal = Terminal::new(self);
+    fn run(mut self) -> io::Result<()> {
+        let mut terminal = Terminal::new();
 
         // Perform terminal setup for the TUI.
         terminal.set_mode(TerminalMode::ShowCursor, false);
@@ -39,7 +39,11 @@ impl Sketch {
         terminal.set_mode(TerminalMode::MouseMotion, true);
         Terminal::goto(0, 0);
 
+        // Resize internal buffer to fit terminal dimensions.
+        self.resize(terminal.dimensions());
+
         // Run the terminal event loop.
+        terminal.set_event_handler(Box::new(self));
         terminal.run()
     }
 
@@ -58,7 +62,11 @@ impl Sketch {
         // Store character in the grid state.
         if persist {
             let Point { column, line } = self.brush.position;
-            *self.content.get_or_insert(line - 1).get_or_insert(column - 1) = c;
+            if let Some(cell) =
+                self.content.get_mut(line - 1).and_then(|line| line.get_mut(column - 1))
+            {
+                *cell = c;
+            }
         }
 
         // Write to the terminal.
@@ -103,15 +111,15 @@ impl Sketch {
                     CursorWriteMode::Write => self.write(self.brush.glyph, true),
                     CursorWriteMode::Erase => self.write(' ', true),
                     CursorWriteMode::Reset => {
-                        let c = *self
+                        let c = self
                             .content
-                            .get_or_insert(target_line as usize - 1)
-                            .get_or_insert(target_column as usize - 1);
+                            .get(target_line as usize - 1)
+                            .and_then(|line| line.get(target_column as usize - 1));
 
-                        if c == '\0' {
-                            self.write(' ', false);
-                        } else {
-                            self.write(c, false);
+                        match c {
+                            Some('\0') => self.write(' ', false),
+                            Some(&c) => self.write(c, false),
+                            _ => (),
                         }
                     },
                 }
@@ -124,8 +132,8 @@ impl Sketch {
 }
 
 impl EventHandler for Sketch {
-    fn keyboard_input(&mut self, event: char) {
-        self.write(event, true);
+    fn keyboard_input(&mut self, glyph: char) {
+        self.write(glyph, true);
     }
 
     fn mouse_input(&mut self, event: MouseEvent) {
@@ -153,6 +161,26 @@ impl EventHandler for Sketch {
         Terminal::set_dim();
         self.write_cursor(CursorWriteMode::WriteVolatile);
         Terminal::reset_sgr();
+    }
+
+    /// Resize the internal terminal state.
+    ///
+    /// This will discard all content that was written outside the terminal dimensions with no way
+    /// to recover it.
+    fn resize(&mut self, dimensions: Dimensions) {
+        let Dimensions { columns, lines } = dimensions;
+        let (columns, lines) = (columns as usize, lines as usize);
+
+        // Add/remove lines.
+        self.content.resize(lines, vec!['\0'; columns]);
+
+        // Resize columns of each line.
+        for line in &mut self.content {
+            line.resize(columns, '\0');
+        }
+
+        // Force redraw to make sure user is up to date.
+        self.redraw();
     }
 
     fn redraw(&mut self) {
@@ -198,23 +226,6 @@ impl Drop for Sketch {
 
         // Print sketch without empty lines above or below it.
         println!("{}", text[start_offset..].trim_end());
-    }
-}
-
-trait GetOrInsert<T> {
-    fn get_or_insert(&mut self, index: usize) -> &mut T;
-}
-
-impl<T: Default> GetOrInsert<T> for Vec<T> {
-    fn get_or_insert(&mut self, index: usize) -> &mut T {
-        let len = self.len();
-        if len <= index {
-            for _ in len..=index {
-                self.push(T::default());
-            }
-        }
-
-        &mut self[index]
     }
 }
 

@@ -3,7 +3,7 @@ use vte::{Params, Perform};
 use crate::terminal::event::MouseEvent;
 use crate::terminal::Terminal;
 
-impl<'a> Perform for Terminal<'a> {
+impl Perform for Terminal {
     fn print(&mut self, c: char) {
         self.event_handler.keyboard_input(c);
     }

@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 
-use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIG_DFL};
+use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH, SIG_DFL};
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
 use signal_hook_mio::v0_7::Signals;
@@ -25,9 +25,9 @@ const SIGNAL_TOKEN: Token = Token(1);
 ///
 /// This is used to make sure the terminal can reset itself properly after the application is
 /// closed.
-pub struct Terminal<'a> {
+pub struct Terminal {
     /// Callbacks for all terminal events.
-    event_handler: &'a mut dyn EventHandler,
+    event_handler: Box<dyn EventHandler>,
 
     /// Terminal attributes for reset after we're done.
     original_termios: libc::termios,
@@ -37,6 +37,9 @@ pub struct Terminal<'a> {
     /// Shared state to allow for termination from the parser.
     terminated: bool,
 
+    /// Terminal dimensions in columns/lines.
+    dimensions: Dimensions,
+
     // NOTE: This is necessary since `signal-hook` does not yet have a way to remove a signal
     // handler which allows adding a handler for the same signal in the future:
     //
@@ -45,15 +48,24 @@ pub struct Terminal<'a> {
     signal_handler: Option<libc::sighandler_t>,
 }
 
-impl<'a> Terminal<'a> {
-    pub fn new(event_handler: &'a mut dyn EventHandler) -> Self {
+impl Terminal {
+    pub fn new() -> Self {
         Terminal {
             modes: TerminalModes::default(),
+            dimensions: Self::tty_dimensions(),
             original_termios: setup_tty(),
+            event_handler: Box::new(()),
             signal_handler: None,
             terminated: false,
-            event_handler,
         }
+    }
+
+    /// Set the handler for terminal events.
+    ///
+    /// It is necessary to call this before [`run`] is called to make sure that events like mouse
+    /// and keyboard input can be reacted upon.
+    pub fn set_event_handler(&mut self, event_handler: Box<dyn EventHandler>) {
+        self.event_handler = event_handler;
     }
 
     /// Run the terminal event loop.
@@ -73,7 +85,7 @@ impl<'a> Terminal<'a> {
         poll.registry().register(&mut SourceFd(&0), STDIN_TOKEN, Interest::READABLE)?;
 
         // Register signal handlers.
-        let mut signals = Signals::new(&[SIGINT, SIGHUP, SIGTERM, SIGTSTP, SIGCONT])?;
+        let mut signals = Signals::new(&[SIGINT, SIGHUP, SIGTERM, SIGTSTP, SIGCONT, SIGWINCH])?;
         poll.registry().register(&mut signals, SIGNAL_TOKEN, Interest::READABLE)?;
 
         // Reserve buffer for reading from STDIN.
@@ -118,6 +130,8 @@ impl<'a> Terminal<'a> {
         for signal in signals.pending() {
             match signal {
                 SIGINT | SIGHUP | SIGTERM => return Err(io::ErrorKind::Interrupted.into()),
+                // Handle terminal resize.
+                SIGWINCH => self.update_size(),
                 SIGCONT => {
                     // Restore the terminal state.
                     self.restore_modes();
@@ -129,6 +143,12 @@ impl<'a> Terminal<'a> {
                             libc::signal(SIGTSTP, sigaction);
                         }
                     }
+
+                    // Check for potential dimension changes.
+                    //
+                    // This is necessary since `SIGWINCH` is not sent when the application is in
+                    // the background.
+                    self.update_size();
 
                     // Request application state update.
                     self.event_handler.redraw();
@@ -148,6 +168,10 @@ impl<'a> Terminal<'a> {
         }
 
         Ok(())
+    }
+
+    pub fn dimensions(&self) -> Dimensions {
+        self.dimensions
     }
 
     /// Set a terminal mode.
@@ -207,6 +231,18 @@ impl<'a> Terminal<'a> {
         }
     }
 
+    /// Check if the terminal dimensions have changed.
+    fn update_size(&mut self) {
+        // Skip resize that do not change columns/lines.
+        let dimensions = Self::tty_dimensions();
+        if dimensions != self.dimensions {
+            self.dimensions = dimensions;
+
+            // Notify event handler about the change.
+            self.event_handler.resize(dimensions);
+        }
+    }
+
     /// Reset all terminal modes to the default.
     fn reset_modes() {
         for (mode, value) in TerminalModes::default().iter() {
@@ -223,11 +259,36 @@ impl<'a> Terminal<'a> {
             Self::write(format!("\x1b[?{}l", mode as u16));
         }
     }
+
+    /// Query terminal dimensions in columns and lines.
+    fn tty_dimensions() -> Dimensions {
+        unsafe {
+            let mut winsize = MaybeUninit::<libc::winsize>::uninit();
+            let result = libc::ioctl(0, libc::TIOCGWINSZ, winsize.as_mut_ptr());
+            if result != -1 {
+                return winsize.assume_init().into();
+            }
+        }
+
+        Dimensions::default()
+    }
 }
 
-impl<'a> Drop for Terminal<'a> {
+impl Drop for Terminal {
     fn drop(&mut self) {
         self.reset();
+    }
+}
+
+#[derive(Default, Copy, Clone, PartialEq, Eq)]
+pub struct Dimensions {
+    pub columns: u16,
+    pub lines: u16,
+}
+
+impl From<libc::winsize> for Dimensions {
+    fn from(winsize: libc::winsize) -> Self {
+        Self { columns: winsize.ws_col, lines: winsize.ws_row }
     }
 }
 

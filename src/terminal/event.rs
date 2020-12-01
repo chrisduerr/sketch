@@ -1,11 +1,16 @@
 use bitflags::bitflags;
 
+use crate::terminal::Dimensions;
+
 pub trait EventHandler {
     /// Mouse cursor clicks and motion.
     fn mouse_input(&mut self, _event: MouseEvent) {}
 
     /// Keyboard characters.
-    fn keyboard_input(&mut self, _event: char) {}
+    fn keyboard_input(&mut self, _glyph: char) {}
+
+    /// Terminal columns/lines have changed.
+    fn resize(&mut self, _dimensions: Dimensions) {}
 
     /// Redraw request.
     ///
@@ -13,6 +18,9 @@ pub trait EventHandler {
     /// emitted whenever the application state should be rendered again.
     fn redraw(&mut self) {}
 }
+
+/// Dummy event handler implementation.
+impl EventHandler for () {}
 
 /// Mouse cursor event.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
