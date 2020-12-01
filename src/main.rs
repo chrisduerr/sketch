@@ -7,7 +7,7 @@ use std::io;
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::terminal::event::{EventHandler, Modifiers, MouseButton, MouseEvent};
+use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
 use crate::terminal::{Dimensions, Terminal, TerminalMode};
 
 fn main() -> io::Result<()> {
@@ -59,23 +59,44 @@ impl Sketch {
     /// application state. This is used to clear things from the grid which are not part of the
     /// sketch (like the cursor preview).
     fn write(&mut self, c: char, persist: bool) {
+        // Verify that the glyph is a printable character.
+        let width = match c.width() {
+            Some(width) if width > 0 => width,
+            _ => return,
+        };
+
+        let Point { column, line } = self.brush.position;
+
+        // Verify the write is within the grid.
+        if self.content.len() < line || self.content[line - 1].len() + 1 < column + width {
+            return;
+        }
+
         // Store character in the grid state.
         if persist {
-            let Point { column, line } = self.brush.position;
-            if let Some(cell) =
-                self.content.get_mut(line - 1).and_then(|line| line.get_mut(column - 1))
-            {
-                *cell = c;
+            // Replace the glyph itself.
+            let line = &mut self.content[line - 1];
+            line[column - 1] = c;
+
+            // Reset the following character when writing fullwidth characters.
+            if width == 2 {
+                line[column] = '\0';
+            }
+
+            // Replace previous fullwidth character if we're writing inside its spacer.
+            if column >= 2 && line[column - 2].width() == Some(2) {
+                line[column - 2] = '\0';
             }
         }
 
         // Write to the terminal.
-        self.brush.position.column += 1;
+        self.brush.position.column += width;
         Terminal::write(c);
     }
 
     /// Write the cursor's content at its current location.
     fn write_cursor(&mut self, mode: CursorWriteMode) {
+        let last_line = self.content.len() as isize;
         let cursor_position = self.brush.position;
 
         // Find the top left corner of the cursor.
@@ -90,17 +111,19 @@ impl Sketch {
 
             // Skip this line if there is no occupied cell within the grid.
             let first_occupied = match first_occupied {
-                Some(first_occupied) if target_line > 0 => first_occupied + skip,
+                Some(first_occupied) if target_line > 0 && target_line <= last_line => {
+                    first_occupied + skip
+                },
                 _ => continue,
             };
 
             // Move the cursor to the target for the first occupied cell.
-            let first_column = origin_column + first_occupied as isize;
-            self.goto(first_column as usize, target_line as usize);
+            let first_column = (origin_column + first_occupied as isize) as usize;
+            self.goto(first_column, target_line as usize);
 
-            for column in first_occupied..self.brush.template[line].len() {
-                let target_column = origin_column + column as isize;
-
+            // Ignore every second cell for fullwidth brushes.
+            let step_size = self.brush.glyph.width().unwrap_or(1);
+            for column in (first_occupied..self.brush.template[line].len()).step_by(step_size) {
                 // Stop once we've reached the end of the current line.
                 if !self.brush.template[line][column] {
                     break;
@@ -109,17 +132,9 @@ impl Sketch {
                 match mode {
                     CursorWriteMode::WriteVolatile => self.write(self.brush.glyph, false),
                     CursorWriteMode::Write => self.write(self.brush.glyph, true),
-                    CursorWriteMode::Erase => self.write(' ', true),
-                    CursorWriteMode::Reset => {
-                        let c = self
-                            .content
-                            .get(target_line as usize - 1)
-                            .and_then(|line| line.get(target_column as usize - 1));
-
-                        match c {
-                            Some('\0') => self.write(' ', false),
-                            Some(&c) => self.write(c, false),
-                            _ => (),
+                    CursorWriteMode::Erase => {
+                        for _ in 0..step_size {
+                            self.write(' ', true);
                         }
                     },
                 }
@@ -137,9 +152,12 @@ impl EventHandler for Sketch {
     }
 
     fn mouse_input(&mut self, event: MouseEvent) {
-        // TODO: Lock stdin in here?
+        // Ignore mouse release events.
+        if event.button_state == ButtonState::Released {
+            return;
+        }
 
-        self.write_cursor(CursorWriteMode::Reset);
+        self.redraw();
 
         self.goto(event.column, event.line);
 
@@ -198,17 +216,24 @@ impl Display for Sketch {
         let mut text = String::new();
 
         for line in &self.content {
-            for c in line {
-                // TODO: Handle fullwidth characters.
+            let mut column = 0;
+            while column < line.len() {
+                let c = line[column];
+
+                // Render empty cells as whitespace.
+                let width = c.width();
                 match c.width() {
-                    None | Some(0) => text.push(' '),
-                    _ => text.push(*c),
+                    Some(1) | Some(2) => text.push(c),
+                    _ => text.push(' '),
                 }
+
+                // Skip columns when dealing with fullwidth characters.
+                column += width.filter(|w| *w != 0).unwrap_or(1);
             }
             text.push('\n');
         }
 
-        write!(f, "{}", text)
+        write!(f, "{}", text.trim_end_matches('\n'))
     }
 }
 
@@ -227,25 +252,6 @@ impl Drop for Sketch {
         // Print sketch without empty lines above or below it.
         println!("{}", text[start_offset..].trim_end());
     }
-}
-
-/// Modes for writing text using the mouse cursor.
-enum CursorWriteMode {
-    /// Write the cursor without storing the result.
-    WriteVolatile,
-    /// Write the cursor.
-    Write,
-    /// Write the cursor as whitespace.
-    Erase,
-    /// Reset the cursor to the grid's content.
-    Reset,
-}
-
-/// Coordinate in the terminal grid.
-#[derive(Default, Copy, Clone)]
-struct Point {
-    column: usize,
-    line: usize,
 }
 
 /// Drawing brush.
@@ -303,6 +309,24 @@ impl Brush {
 
         cursor
     }
+}
+
+/// Modes for writing text using the mouse cursor.
+#[derive(Debug)]
+enum CursorWriteMode {
+    /// Write the cursor without storing the result.
+    WriteVolatile,
+    /// Write the cursor.
+    Write,
+    /// Write the cursor as whitespace.
+    Erase,
+}
+
+/// Coordinate in the terminal grid.
+#[derive(Default, Copy, Clone)]
+struct Point {
+    column: usize,
+    line: usize,
 }
 
 #[cfg(test)]
