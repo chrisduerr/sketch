@@ -5,16 +5,16 @@ use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 
-use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH, SIG_DFL};
+use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
-use signal_hook_mio::v0_7::Signals;
 use vte::Parser;
 
 use crate::terminal::event::EventHandler;
 
 pub mod event;
 mod parser;
+mod signal;
 
 /// Mio token for reading from STDIN.
 const STDIN_TOKEN: Token = Token(0);
@@ -39,13 +39,6 @@ pub struct Terminal {
 
     /// Terminal dimensions in columns/lines.
     dimensions: Dimensions,
-
-    // NOTE: This is necessary since `signal-hook` does not yet have a way to remove a signal
-    // handler which allows adding a handler for the same signal in the future:
-    //
-    // https://github.com/vorner/signal-hook/issues/30
-    /// SIGTSTP signal handler action.
-    signal_handler: Option<libc::sighandler_t>,
 }
 
 impl Terminal {
@@ -55,7 +48,6 @@ impl Terminal {
             dimensions: Self::tty_dimensions(),
             original_termios: setup_tty(),
             event_handler: Box::new(()),
-            signal_handler: None,
             terminated: false,
         }
     }
@@ -85,8 +77,13 @@ impl Terminal {
         poll.registry().register(&mut SourceFd(&0), STDIN_TOKEN, Interest::READABLE)?;
 
         // Register signal handlers.
-        let mut signals = Signals::new(&[SIGINT, SIGHUP, SIGTERM, SIGTSTP, SIGCONT, SIGWINCH])?;
-        poll.registry().register(&mut signals, SIGNAL_TOKEN, Interest::READABLE)?;
+        let signal_receiver = signal::mio_receiver(poll.registry(), SIGNAL_TOKEN)?;
+        signal::register(SIGWINCH)?;
+        signal::register(SIGTSTP)?;
+        signal::register(SIGCONT)?;
+        signal::register(SIGTERM)?;
+        signal::register(SIGINT)?;
+        signal::register(SIGHUP)?;
 
         // Reserve buffer for reading from STDIN.
         let mut buf = [0; u16::max_value() as usize];
@@ -109,9 +106,15 @@ impl Terminal {
                         }
                     },
                     SIGNAL_TOKEN => {
-                        // Handle shutdown if a signal requested it.
-                        if self.handle_signals(&mut signals).is_err() {
-                            break 'event_loop;
+                        while let Ok(signal) = signal_receiver.try_recv() {
+                            // Handle shutdown if a signal requested it.
+                            match self.handle_signal(signal) {
+                                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                                    break 'event_loop
+                                },
+                                err @ Err(_) => return err,
+                                _ => (),
+                            }
                         }
                     },
                     _ => unreachable!(),
@@ -122,49 +125,48 @@ impl Terminal {
         Ok(())
     }
 
-    /// Handle POSIX signals.
+    /// Handle a POSIX signal.
+    ///
+    /// # Errors
     ///
     /// This function will raise an [`io::ErrorKind::Interrupted`] error if the signal requested an
     /// application shutdown.
-    fn handle_signals(&mut self, signals: &mut Signals) -> io::Result<()> {
-        for signal in signals.pending() {
-            match signal {
-                SIGINT | SIGHUP | SIGTERM => return Err(io::ErrorKind::Interrupted.into()),
-                // Handle terminal resize.
-                SIGWINCH => self.update_size(),
-                SIGCONT => {
-                    // Restore the terminal state.
-                    self.restore_modes();
-                    self.original_termios = setup_tty();
+    fn handle_signal(&mut self, signal: libc::c_int) -> io::Result<()> {
+        match signal {
+            SIGINT | SIGHUP | SIGTERM => return Err(io::ErrorKind::Interrupted.into()),
+            // Handle terminal resize.
+            SIGWINCH => self.update_size(),
+            SIGCONT => {
+                // Restore the terminal state.
+                self.restore_modes();
+                self.original_termios = setup_tty();
 
-                    // Restore the SIGTSTP signal handler.
-                    if let Some(sigaction) = self.signal_handler.take() {
-                        unsafe {
-                            libc::signal(SIGTSTP, sigaction);
-                        }
+                // Restore the SIGTSTP signal handler.
+                signal::register(SIGTSTP)?;
+
+                // Check for potential dimension changes.
+                //
+                // This is necessary since `SIGWINCH` is not sent when the application is in
+                // the background.
+                self.update_size();
+
+                // Request application state update.
+                self.event_handler.redraw();
+            },
+            SIGTSTP => {
+                // Clear terminal state.
+                self.reset();
+
+                // Remove SIGTSTP handler and self-request another suspension.
+                signal::unregister(SIGTSTP)?;
+                unsafe {
+                    let result = libc::raise(SIGTSTP);
+                    if result != 0 {
+                        return Err(io::Error::last_os_error());
                     }
-
-                    // Check for potential dimension changes.
-                    //
-                    // This is necessary since `SIGWINCH` is not sent when the application is in
-                    // the background.
-                    self.update_size();
-
-                    // Request application state update.
-                    self.event_handler.redraw();
-                },
-                SIGTSTP => {
-                    // Clear terminal state.
-                    self.reset();
-
-                    // Remove SIGTSTP handler and self-request another suspension.
-                    unsafe {
-                        self.signal_handler = Some(libc::signal(SIGTSTP, SIG_DFL));
-                        libc::raise(SIGTSTP);
-                    }
-                },
-                _ => unreachable!(),
-            }
+                }
+            },
+            _ => unreachable!(),
         }
 
         Ok(())
