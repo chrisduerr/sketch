@@ -421,10 +421,19 @@ enum CursorWriteMode {
 }
 
 /// Coordinate in the terminal grid.
-#[derive(Default, Copy, Clone)]
+#[derive(Copy, Clone)]
 struct Point {
     column: usize,
     line: usize,
+}
+
+impl Default for Point {
+    fn default() -> Self {
+        Self {
+            column: 1,
+            line: 1,
+        }
+    }
 }
 
 #[cfg(test)]
