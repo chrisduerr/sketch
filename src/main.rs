@@ -151,12 +151,17 @@ impl Sketch {
 
     /// Redraw the current sketch.
     fn redraw_content(&self, dimensions: Dimensions) {
+        let Point { column, line } = self.brush.position;
+
         print!("\x1b[H{}", self);
 
         // Redraw dialogs.
         if let SketchMode::BrushCharacterPrompt(dialog) = &self.mode {
             dialog.render(dimensions);
         }
+
+        // Restore cursor position.
+        Terminal::goto(column, line);
     }
 
     /// Open dialog for brush character selection.
@@ -181,6 +186,17 @@ impl Sketch {
         // Redraw everything.
         self.redraw_content(terminal.dimensions);
     }
+
+    /// Emulate backspace to delete the last character.
+    fn backspace(&mut self) {
+        // Move cursor to the previous cell.
+        let Point { column, line } = self.brush.position;
+        self.goto(column.saturating_sub(1), line);
+
+        // Overwrite cell without moving cursor.
+        self.write(' ', true);
+        self.goto(column.saturating_sub(1), line);
+    }
 }
 
 impl EventHandler for Sketch {
@@ -199,7 +215,18 @@ impl EventHandler for Sketch {
             },
             SketchMode::Sketching => match glyph {
                 '\x02' => self.open_brush_character_dialog(terminal),
-                glyph => self.write(glyph, true),
+                // Delete last character on backspace.
+                '\x7f' => self.backspace(),
+                glyph => {
+                    // Hide mouse brush.
+                    self.redraw_content(terminal.dimensions);
+
+                    // Show IBeam cursor while typing.
+                    terminal.set_mode(TerminalMode::ShowCursor, true);
+                    Terminal::set_cursor_shape(CursorShape::IBeam);
+
+                    self.write(glyph, true);
+                }
             },
         }
     }
@@ -209,6 +236,9 @@ impl EventHandler for Sketch {
         if event.button_state == ButtonState::Released || self.mode != SketchMode::Sketching {
             return;
         }
+
+        // Hide terminal cursor while using the mouse.
+        terminal.set_mode(TerminalMode::ShowCursor, false);
 
         self.redraw_content(terminal.dimensions);
 
