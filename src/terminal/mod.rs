@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::mem::MaybeUninit;
+use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
 use std::ptr;
@@ -26,6 +26,9 @@ const SIGNAL_TOKEN: Token = Token(1);
 /// This is used to make sure the terminal can reset itself properly after the application is
 /// closed.
 pub struct Terminal {
+    /// Terminal dimensions in columns/lines.
+    pub dimensions: Dimensions,
+
     /// Callbacks for all terminal events.
     event_handler: Box<dyn EventHandler>,
 
@@ -36,9 +39,6 @@ pub struct Terminal {
 
     /// Shared state to allow for termination from the parser.
     terminated: bool,
-
-    /// Terminal dimensions in columns/lines.
-    dimensions: Dimensions,
 }
 
 impl Terminal {
@@ -151,7 +151,7 @@ impl Terminal {
                 self.update_size();
 
                 // Request application state update.
-                self.event_handler.redraw();
+                self.handle_event(|handler, terminal| handler.redraw(terminal));
             },
             SIGTSTP => {
                 // Clear terminal state.
@@ -205,6 +205,11 @@ impl Terminal {
         Self::write("\x1b[0m");
     }
 
+    /// Set the terminal cursor shape.
+    pub fn set_cursor_shape(cursor_shape: CursorShape) {
+        Self::write(format!("\x1b[{} q", cursor_shape as u8));
+    }
+
     /// Write some text at the current cursor location.
     pub fn write<T: Into<String>>(text: T) {
         let mut stdout = io::stdout();
@@ -222,6 +227,7 @@ impl Terminal {
     /// Reset all terminal modifications.
     fn reset(&self) {
         Self::reset_modes();
+        Self::set_cursor_shape(CursorShape::Default);
         reset_tty(self.original_termios);
     }
 
@@ -241,8 +247,15 @@ impl Terminal {
             self.dimensions = dimensions;
 
             // Notify event handler about the change.
-            self.event_handler.resize(dimensions);
+            self.handle_event(|handler, terminal| handler.resize(terminal, dimensions));
         }
+    }
+
+    /// Dispatch an event with a reference to the terminal attached.
+    fn handle_event<F: FnMut(&mut dyn EventHandler, &mut Terminal)>(&mut self, mut f: F) {
+        let mut event_handler = mem::replace(&mut self.event_handler, Box::new(()));
+        f(event_handler.as_mut(), self);
+        self.event_handler = event_handler;
     }
 
     /// Reset all terminal modes to the default.
@@ -280,6 +293,14 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         self.reset();
     }
+}
+
+/// Terminal cursor shape.
+pub enum CursorShape {
+    Default = 0,
+    Block = 2,
+    Underline = 4,
+    IBeam = 6,
 }
 
 #[derive(Default, Copy, Clone, PartialEq, Eq)]

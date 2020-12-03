@@ -1,22 +1,22 @@
 use bitflags::bitflags;
 
-use crate::terminal::Dimensions;
+use crate::terminal::{Dimensions, Terminal};
 
 pub trait EventHandler {
     /// Mouse cursor clicks and motion.
-    fn mouse_input(&mut self, _event: MouseEvent) {}
+    fn mouse_input(&mut self, _terminal: &mut Terminal, _event: MouseEvent) {}
 
     /// Keyboard characters.
-    fn keyboard_input(&mut self, _glyph: char) {}
+    fn keyboard_input(&mut self, _terminal: &mut Terminal, _glyph: char) {}
 
     /// Terminal columns/lines have changed.
-    fn resize(&mut self, _dimensions: Dimensions) {}
+    fn resize(&mut self, _terminal: &mut Terminal, _dimensions: Dimensions) {}
 
     /// Redraw request.
     ///
     /// Since some actions can clear the terminal, like recovering from a suspension, this event is
     /// emitted whenever the application state should be rendered again.
-    fn redraw(&mut self) {}
+    fn redraw(&mut self, _terminal: &mut Terminal) {}
 }
 
 /// Dummy event handler implementation.

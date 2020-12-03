@@ -1,3 +1,4 @@
+mod dialog;
 mod terminal;
 
 use std::cmp::max;
@@ -7,8 +8,9 @@ use std::io;
 
 use unicode_width::UnicodeWidthChar;
 
+use crate::dialog::Dialog;
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
-use crate::terminal::{Dimensions, Terminal, TerminalMode};
+use crate::terminal::{Dimensions, Terminal, TerminalMode, CursorShape};
 
 fn main() -> io::Result<()> {
     Sketch::new().run()
@@ -18,6 +20,7 @@ fn main() -> io::Result<()> {
 #[derive(Default)]
 struct Sketch {
     content: Vec<Vec<char>>,
+    mode: SketchMode,
     brush: Brush,
 }
 
@@ -40,7 +43,8 @@ impl Sketch {
         Terminal::goto(0, 0);
 
         // Resize internal buffer to fit terminal dimensions.
-        self.resize(terminal.dimensions());
+        let dimensions = terminal.dimensions();
+        self.resize(&mut terminal, dimensions);
 
         // Run the terminal event loop.
         terminal.set_event_handler(Box::new(self));
@@ -144,20 +148,69 @@ impl Sketch {
         // Restore cursor position.
         self.goto(cursor_position.column, cursor_position.line);
     }
+
+    /// Redraw the current sketch.
+    fn redraw_content(&self, dimensions: Dimensions) {
+        print!("\x1b[H{}", self);
+
+        // Redraw dialogs.
+        if let SketchMode::BrushCharacterPrompt(dialog) = &self.mode {
+            dialog.render(dimensions);
+        }
+    }
+
+    /// Open dialog for brush character selection.
+    fn open_brush_character_dialog(&mut self, terminal: &mut Terminal) {
+        let dialog = Dialog::new("Pick a brush character:  ");
+        dialog.render(terminal.dimensions);
+
+        // Show the terminal cursor.
+        terminal.set_mode(TerminalMode::ShowCursor, true);
+        Terminal::set_cursor_shape(CursorShape::Underline);
+
+        self.mode = SketchMode::BrushCharacterPrompt(dialog);
+    }
+
+    /// Close all dialogs and go back to sketching mode.
+    fn close_dialog(&mut self, terminal: &mut Terminal) {
+        self.mode = SketchMode::Sketching;
+
+        // Hide the terminal cursor.
+        terminal.set_mode(TerminalMode::ShowCursor, false);
+
+        // Redraw everything.
+        self.redraw_content(terminal.dimensions);
+    }
 }
 
 impl EventHandler for Sketch {
-    fn keyboard_input(&mut self, glyph: char) {
-        self.write(glyph, true);
+    fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) {
+        match &mut self.mode {
+            SketchMode::BrushCharacterPrompt(dialog) => match glyph {
+                '\n' => self.close_dialog(terminal),
+                glyph if glyph.width().unwrap_or(0) > 0 && !glyph.is_whitespace() => {
+                    dialog.text.truncate(dialog.text.len() - 1);
+                    dialog.text.push(glyph);
+                    dialog.render(terminal.dimensions);
+
+                    self.brush.glyph = glyph;
+                },
+                _ => (),
+            },
+            SketchMode::Sketching => match glyph {
+                '\x02' => self.open_brush_character_dialog(terminal),
+                glyph => self.write(glyph, true),
+            },
+        }
     }
 
-    fn mouse_input(&mut self, event: MouseEvent) {
+    fn mouse_input(&mut self, terminal: &mut Terminal, event: MouseEvent) {
         // Ignore mouse release events.
-        if event.button_state == ButtonState::Released {
+        if event.button_state == ButtonState::Released || self.mode != SketchMode::Sketching {
             return;
         }
 
-        self.redraw();
+        self.redraw_content(terminal.dimensions);
 
         self.goto(event.column, event.line);
 
@@ -185,7 +238,7 @@ impl EventHandler for Sketch {
     ///
     /// This will discard all content that was written outside the terminal dimensions with no way
     /// to recover it.
-    fn resize(&mut self, dimensions: Dimensions) {
+    fn resize(&mut self, terminal: &mut Terminal, dimensions: Dimensions) {
         let Dimensions { columns, lines } = dimensions;
         let (columns, lines) = (columns as usize, lines as usize);
 
@@ -198,11 +251,11 @@ impl EventHandler for Sketch {
         }
 
         // Force redraw to make sure user is up to date.
-        self.redraw();
+        self.redraw_content(terminal.dimensions);
     }
 
-    fn redraw(&mut self) {
-        print!("\x1b[H{}", self);
+    fn redraw(&mut self, terminal: &mut Terminal) {
+        self.redraw_content(terminal.dimensions);
     }
 }
 
@@ -308,6 +361,21 @@ impl Brush {
         }
 
         cursor
+    }
+}
+
+/// Current application state.
+#[derive(PartialEq, Eq)]
+enum SketchMode {
+    /// Default drawing mode.
+    Sketching,
+    /// Brush character dialog prompt.
+    BrushCharacterPrompt(Dialog),
+}
+
+impl Default for SketchMode {
+    fn default() -> Self {
+        SketchMode::Sketching
     }
 }
 

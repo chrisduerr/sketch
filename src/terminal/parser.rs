@@ -5,13 +5,14 @@ use crate::terminal::Terminal;
 
 impl Perform for Terminal {
     fn print(&mut self, c: char) {
-        self.event_handler.keyboard_input(c);
+        self.handle_event(|handler, terminal| handler.keyboard_input(terminal, c));
     }
 
     fn execute(&mut self, byte: u8) {
-        // Handle ^D.
-        if byte == 4 {
-            self.terminated = true;
+        match byte {
+            // Handle Ctrl+D.
+            4 => self.terminated = true,
+            b => self.handle_event(|handler, terminal| handler.keyboard_input(terminal, b as char)),
         }
     }
 
@@ -22,7 +23,7 @@ impl Perform for Terminal {
                 let params: Vec<u16> = params.into_iter().flatten().copied().collect();
                 if params.len() >= 3 {
                     let event = MouseEvent::new(params[0], params[1], params[2], action);
-                    self.event_handler.mouse_input(event);
+                    self.handle_event(|handler, terminal| handler.mouse_input(terminal, event));
                 }
             },
             _ => (),
