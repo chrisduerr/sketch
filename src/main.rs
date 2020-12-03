@@ -104,8 +104,8 @@ impl Sketch {
         let cursor_position = self.brush.position;
 
         // Find the top left corner of the cursor.
-        let origin_column = cursor_position.column as isize - (self.brush.size as isize - 1);
-        let origin_line = cursor_position.line as isize - (self.brush.size as isize - 1);
+        let origin_column = cursor_position.column as isize - self.brush.template[0].len() as isize / 2;
+        let origin_line = cursor_position.line as isize - self.brush.template.len() as isize / 2;
 
         // Write the cursor characters.
         for line in 0..self.brush.template.len() {
@@ -359,34 +359,46 @@ impl Default for Brush {
 impl Brush {
     /// Create a new brush template.
     ///
-    /// The brush will always be diamond shaped, the resulting template is a matrix that stores
+    /// The brush will always be hexagon shaped, the resulting template is a matrix that stores
     /// `true` for every cell that contains a brush glyph and `false` for all empty cells.
     ///
-    /// A brush with size 3 might look like this (`+`: `true`, `-`: `false`):
+    /// A brush with size 6 might look like this (`+`: `true`, `-`: `false`):
     ///
     /// ```
-    /// --+--
-    /// -+++-
-    /// +++++
-    /// -+++-
-    /// --+--
+    /// --++++++--
+    /// -++++++++-
+    /// ++++++++++
+    /// -++++++++-
+    /// --++++++--
     /// ```
     fn create_template(size: u8) -> Vec<Vec<bool>> {
-        let width = size as usize * 2 - 1;
-        let mut cursor = vec![vec![false; width]; width];
+        // Special case the default 1x1 cursor.
+        if size == 1 {
+            return vec![vec![true]];
+        }
 
-        let mut num_chars = 1;
-        for line in 0..width {
-            let start = width / 2 - num_chars / 2;
+        let size = size as usize;
 
-            for column in start..(start + num_chars) {
+        let width = size + (size / 2 - 1) * 2;
+        let height = size - 1;
+
+        // Initialize an empty cursor.
+        let mut cursor = vec![vec![false; width]; height];
+
+        let mid_point = (size - 1) as f32 / 2.;
+        let mut num_occupied = size;
+        for line in 0..height {
+            // Set all occupied bits in the current line.
+            for column in 0..num_occupied {
+                let column = (width - num_occupied) / 2 + column;
                 cursor[line][column] = true;
             }
 
-            if line < width / 2 {
-                num_chars += 2;
-            } else {
-                num_chars = num_chars.saturating_sub(2);
+            // Increment/Decrement based on current line in hexagon.
+            if line as f32 + 1. < mid_point {
+                num_occupied += 2;
+            } else if line as f32 + 1. > mid_point {
+                num_occupied -= 2;
             }
         }
 
@@ -448,18 +460,22 @@ mod tests {
 
         let cursor = Brush::create_template(2);
         assert_eq!(cursor, vec![
-            vec![false, true, false],
-            vec![true,  true, true ],
-            vec![false, true, false],
+            vec![true, true],
         ]);
 
         let cursor = Brush::create_template(3);
         assert_eq!(cursor, vec![
-            vec![false, false, true, false, false],
-            vec![false, true,  true, true,  false],
-            vec![true,  true,  true, true,  true ],
-            vec![false, true,  true, true,  false],
-            vec![false, false, true, false, false],
+            vec![true, true, true],
+            vec![true, true, true],
+        ]);
+
+        let cursor = Brush::create_template(6);
+        assert_eq!(cursor, vec![
+            vec![false, false, true, true, true, true, true, true, false, false],
+            vec![false, true,  true, true, true, true, true, true, true,  false],
+            vec![true,  true,  true, true, true, true, true, true, true,  true ],
+            vec![false, true,  true, true, true, true, true, true, true,  false],
+            vec![false, false, true, true, true, true, true, true, false, false],
         ]);
     }
 }
