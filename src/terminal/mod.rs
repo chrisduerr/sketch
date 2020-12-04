@@ -3,8 +3,8 @@ use std::io::{self, Read, Write};
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
-use std::str::{self, FromStr};
 use std::ptr;
+use std::str::{self, FromStr};
 
 use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
 use mio::unix::SourceFd;

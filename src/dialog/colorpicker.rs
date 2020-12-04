@@ -1,8 +1,8 @@
+use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
-use std::fmt::{self, Formatter, Display};
 
 use crate::dialog::Dialog;
-use crate::terminal::{Color, Terminal, Rgb};
+use crate::terminal::{Color, Rgb, Terminal};
 
 /// Message prompt of the colorpicker dialog.
 const COLORPICKER_DIALOG_PROMPT: &str = "Pick a color: ";
@@ -90,9 +90,7 @@ impl ColorpickerMode {
     fn color(&self) -> Color {
         match self {
             Self::CTerm(color) => Color::Indexed(*color),
-            Self::Rgb(color) => {
-                Rgb::from_str(color).map(|rgb| Color::Rgb(rgb)).unwrap_or_default()
-            },
+            Self::Rgb(color) => Rgb::from_str(color).map(|rgb| Color::Rgb(rgb)).unwrap_or_default(),
         }
     }
 

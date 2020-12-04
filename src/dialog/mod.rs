@@ -1,6 +1,6 @@
 use unicode_width::UnicodeWidthStr;
 
-use crate::terminal::{Dimensions, Terminal, TerminalMode, CursorShape, Color};
+use crate::terminal::{Color, CursorShape, Terminal, TerminalMode};
 
 pub mod colorpicker;
 

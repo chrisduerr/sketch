@@ -1,18 +1,18 @@
 mod dialog;
 mod terminal;
 
-use std::mem;
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::io;
+use std::mem;
 
 use unicode_width::UnicodeWidthChar;
 
+use crate::dialog::colorpicker::{ColorPosition, ColorpickerDialog};
 use crate::dialog::{BrushCharacterDialog, Dialog};
-use crate::dialog::colorpicker::{ColorpickerDialog, ColorPosition};
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
-use crate::terminal::{Dimensions, Terminal, TerminalMode, CursorShape, Color};
+use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
 fn main() -> io::Result<()> {
     Sketch::new().run()
@@ -111,11 +111,13 @@ impl Sketch {
         let cursor_position = self.brush.position;
 
         // Find the top left corner of the cursor.
-        let origin_column = cursor_position.column as isize - self.brush.template[0].len() as isize / 2;
-        let origin_line = cursor_position.line as isize - self.brush.template.len() as isize / 2;
+        let brush_width = self.brush.template[0].len();
+        let brush_height = self.brush.template.len();
+        let origin_column = cursor_position.column as isize - brush_width as isize / 2;
+        let origin_line = cursor_position.line as isize - brush_height as isize / 2;
 
         // Write the cursor characters.
-        for line in 0..self.brush.template.len() {
+        for line in 0..brush_height {
             let target_line = origin_line + line as isize;
             let skip = usize::try_from(origin_column * -1 + 1).unwrap_or_default();
             let first_occupied = self.brush.template[line].iter().skip(skip).position(|b| *b);
@@ -134,7 +136,7 @@ impl Sketch {
 
             // Ignore every second cell for fullwidth brushes.
             let step_size = self.brush.glyph.width().unwrap_or(1);
-            for column in (first_occupied..self.brush.template[line].len()).step_by(step_size) {
+            for column in (first_occupied..brush_width).step_by(step_size) {
                 // Stop once we've reached the end of the current line.
                 if !self.brush.template[line][column] {
                     break;
@@ -159,6 +161,13 @@ impl Sketch {
         self.goto(cursor_position.column, cursor_position.line);
     }
 
+    // Preview the sketching brush using the dim colors.
+    fn preview_brush(&mut self) {
+        Terminal::set_dim();
+        self.write_cursor(CursorWriteMode::WriteVolatile);
+        Terminal::reset_sgr();
+    }
+
     /// Close all dialogs and go back to sketching mode.
     fn close_dialog(&mut self, terminal: &mut Terminal) {
         self.mode = SketchMode::Sketching;
@@ -168,6 +177,8 @@ impl Sketch {
 
         // Redraw everything.
         self.redraw(terminal);
+
+        self.preview_brush();
     }
 
     /// Emulate backspace to delete the last character.
@@ -192,6 +203,9 @@ impl Sketch {
 
 impl EventHandler for Sketch {
     fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) {
+        // Hide mouse brush while typing.
+        self.redraw(terminal);
+
         match &mut self.mode {
             SketchMode::BrushCharacterDialog => match glyph {
                 '\n' => self.close_dialog(terminal),
@@ -225,16 +239,14 @@ impl EventHandler for Sketch {
                 },
                 // Delete last character on backspace.
                 '\x7f' => self.backspace(),
-                glyph => {
-                    // Hide mouse brush.
-                    self.redraw(terminal);
-
+                glyph if glyph.width().unwrap_or_default() > 0 => {
                     // Show IBeam cursor while typing.
                     terminal.set_mode(TerminalMode::ShowCursor, true);
                     Terminal::set_cursor_shape(CursorShape::IBeam);
 
                     self.write(glyph, true);
-                }
+                },
+                _ => (),
             },
         }
     }
@@ -266,10 +278,7 @@ impl EventHandler for Sketch {
             _ => (),
         }
 
-        // Preview cursor using the dim colors.
-        Terminal::set_dim();
-        self.write_cursor(CursorWriteMode::WriteVolatile);
-        Terminal::reset_sgr();
+        self.preview_brush();
     }
 
     /// Resize the internal terminal state.
@@ -499,10 +508,7 @@ struct Point {
 
 impl Default for Point {
     fn default() -> Self {
-        Self {
-            column: 1,
-            line: 1,
-        }
+        Self { column: 1, line: 1 }
     }
 }
 
