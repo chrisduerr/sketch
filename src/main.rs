@@ -8,7 +8,7 @@ use std::io;
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::dialog::Dialog;
+use crate::dialog::BrushCharacterDialog;
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
 use crate::terminal::{Dimensions, Terminal, TerminalMode, CursorShape};
 
@@ -149,33 +149,6 @@ impl Sketch {
         self.goto(cursor_position.column, cursor_position.line);
     }
 
-    /// Redraw the current sketch.
-    fn redraw_content(&self, dimensions: Dimensions) {
-        let Point { column, line } = self.brush.position;
-
-        print!("\x1b[H{}", self);
-
-        // Redraw dialogs.
-        if let SketchMode::BrushCharacterPrompt(dialog) = &self.mode {
-            dialog.render(dimensions);
-        }
-
-        // Restore cursor position.
-        Terminal::goto(column, line);
-    }
-
-    /// Open dialog for brush character selection.
-    fn open_brush_character_dialog(&mut self, terminal: &mut Terminal) {
-        let dialog = Dialog::new("Pick a brush character:  ");
-        dialog.render(terminal.dimensions);
-
-        // Show the terminal cursor.
-        terminal.set_mode(TerminalMode::ShowCursor, true);
-        Terminal::set_cursor_shape(CursorShape::Underline);
-
-        self.mode = SketchMode::BrushCharacterPrompt(dialog);
-    }
-
     /// Close all dialogs and go back to sketching mode.
     fn close_dialog(&mut self, terminal: &mut Terminal) {
         self.mode = SketchMode::Sketching;
@@ -184,7 +157,7 @@ impl Sketch {
         terminal.set_mode(TerminalMode::ShowCursor, false);
 
         // Redraw everything.
-        self.redraw_content(terminal.dimensions);
+        self.redraw(terminal);
     }
 
     /// Emulate backspace to delete the last character.
@@ -202,24 +175,24 @@ impl Sketch {
 impl EventHandler for Sketch {
     fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) {
         match &mut self.mode {
-            SketchMode::BrushCharacterPrompt(dialog) => match glyph {
+            SketchMode::BrushCharacterDialog => match glyph {
                 '\n' => self.close_dialog(terminal),
                 glyph if glyph.width().unwrap_or(0) > 0 && !glyph.is_whitespace() => {
-                    dialog.text.truncate(dialog.text.len() - 1);
-                    dialog.text.push(glyph);
-                    dialog.render(terminal.dimensions);
-
+                    BrushCharacterDialog::new(glyph).render(terminal);
                     self.brush.glyph = glyph;
                 },
                 _ => (),
             },
             SketchMode::Sketching => match glyph {
-                '\x02' => self.open_brush_character_dialog(terminal),
+                '\x02' => {
+                    BrushCharacterDialog::new(self.brush.glyph).render(terminal);
+                    self.mode = SketchMode::BrushCharacterDialog;
+                },
                 // Delete last character on backspace.
                 '\x7f' => self.backspace(),
                 glyph => {
                     // Hide mouse brush.
-                    self.redraw_content(terminal.dimensions);
+                    self.redraw(terminal);
 
                     // Show IBeam cursor while typing.
                     terminal.set_mode(TerminalMode::ShowCursor, true);
@@ -240,7 +213,7 @@ impl EventHandler for Sketch {
         // Hide terminal cursor while using the mouse.
         terminal.set_mode(TerminalMode::ShowCursor, false);
 
-        self.redraw_content(terminal.dimensions);
+        self.redraw(terminal);
 
         self.goto(event.column, event.line);
 
@@ -281,11 +254,21 @@ impl EventHandler for Sketch {
         }
 
         // Force redraw to make sure user is up to date.
-        self.redraw_content(terminal.dimensions);
+        self.redraw(terminal);
     }
 
     fn redraw(&mut self, terminal: &mut Terminal) {
-        self.redraw_content(terminal.dimensions);
+        let Point { column, line } = self.brush.position;
+
+        print!("\x1b[H{}", self);
+
+        // Redraw dialogs.
+        if let SketchMode::BrushCharacterDialog = &self.mode {
+            BrushCharacterDialog::new(self.brush.glyph).render(terminal);
+        }
+
+        // Restore cursor position.
+        Terminal::goto(column, line);
     }
 }
 
@@ -412,7 +395,7 @@ enum SketchMode {
     /// Default drawing mode.
     Sketching,
     /// Brush character dialog prompt.
-    BrushCharacterPrompt(Dialog),
+    BrushCharacterDialog,
 }
 
 impl Default for SketchMode {
