@@ -7,7 +7,7 @@ use crate::terminal::{Color, Rgb, Terminal};
 /// Message prompt of the colorpicker dialog.
 const COLORPICKER_DIALOG_PROMPT: &str = "Pick a color: ";
 /// Help text of the colorpicker dialog.
-const COLORPICKER_DIALOG_HELP: &str = "[^R] RGB   [^T] CTerm";
+const COLORPICKER_DIALOG_HELP: &str = "[^R] RGB    [^T] CTerm    [^E] Default";
 
 /// Dialog for selecting RGB or CTerm colors.
 #[derive(PartialEq, Eq)]
@@ -134,7 +134,7 @@ impl Display for ColorpickerMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rgb(color) => write!(f, "#{: <1}", color),
-            Self::CTerm(color) => write!(f, "{: >7}", color),
+            Self::CTerm(color) => write!(f, "{: >3}", color),
         }
     }
 }
