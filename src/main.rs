@@ -1,6 +1,7 @@
 mod dialog;
 mod terminal;
 
+use std::mem;
 use std::cmp::max;
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
@@ -8,9 +9,10 @@ use std::io;
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::dialog::BrushCharacterDialog;
+use crate::dialog::{BrushCharacterDialog, Dialog};
+use crate::dialog::colorpicker::{ColorpickerDialog, ColorPosition};
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
-use crate::terminal::{Dimensions, Terminal, TerminalMode, CursorShape};
+use crate::terminal::{Dimensions, Terminal, TerminalMode, CursorShape, Color};
 
 fn main() -> io::Result<()> {
     Sketch::new().run()
@@ -19,7 +21,7 @@ fn main() -> io::Result<()> {
 /// Sketch application state.
 #[derive(Default)]
 struct Sketch {
-    content: Vec<Vec<char>>,
+    content: Vec<Vec<Cell>>,
     mode: SketchMode,
     brush: Brush,
 }
@@ -77,21 +79,26 @@ impl Sketch {
         }
 
         // Store character in the grid state.
+        let foreground = self.brush.foreground_color;
+        let background = self.brush.background_color;
         if persist {
             // Replace the glyph itself.
             let line = &mut self.content[line - 1];
-            line[column - 1] = c;
+            line[column - 1] = Cell::new(c, foreground, background);
 
             // Reset the following character when writing fullwidth characters.
             if width == 2 {
-                line[column] = '\0';
+                line[column].clear();
             }
 
             // Replace previous fullwidth character if we're writing inside its spacer.
-            if column >= 2 && line[column - 2].width() == Some(2) {
-                line[column - 2] = '\0';
+            if column >= 2 && line[column - 2].c.width() == Some(2) {
+                line[column - 2].clear();
             }
         }
+
+        // Set the correct colors for the terminal write.
+        Terminal::set_color(foreground, background);
 
         // Write to the terminal.
         self.brush.position.column += width;
@@ -137,9 +144,12 @@ impl Sketch {
                     CursorWriteMode::WriteVolatile => self.write(self.brush.glyph, false),
                     CursorWriteMode::Write => self.write(self.brush.glyph, true),
                     CursorWriteMode::Erase => {
+                        // Overwrite characters with default background set.
+                        let background = mem::take(&mut self.brush.background_color);
                         for _ in 0..step_size {
                             self.write(' ', true);
                         }
+                        self.brush.background_color = background;
                     },
                 }
             }
@@ -170,6 +180,14 @@ impl Sketch {
         self.write(' ', true);
         self.goto(column.saturating_sub(1), line);
     }
+
+    /// Open the dialog for color selection.
+    fn open_color_dialog(&mut self, terminal: &mut Terminal, color_position: ColorPosition) {
+        let dialog = ColorpickerDialog::new(color_position);
+        dialog.render(terminal);
+
+        self.mode = SketchMode::ColorpickerDialog(dialog);
+    }
 }
 
 impl EventHandler for Sketch {
@@ -183,8 +201,25 @@ impl EventHandler for Sketch {
                 },
                 _ => (),
             },
+            SketchMode::ColorpickerDialog(dialog) => match glyph {
+                '\n' => {
+                    let color = match dialog.color_position() {
+                        ColorPosition::Foreground => &mut self.brush.foreground_color,
+                        ColorPosition::Background => &mut self.brush.background_color,
+                    };
+                    *color = dialog.color();
+
+                    self.close_dialog(terminal);
+                },
+                glyph => dialog.keyboard_input(terminal, glyph),
+            },
             SketchMode::Sketching => match glyph {
-                '\x02' => {
+                // Open background colorpicker dialog on ^B.
+                '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),
+                // Open foreground colorpicker dialog on ^F.
+                '\x06' => self.open_color_dialog(terminal, ColorPosition::Foreground),
+                // Open brush character dialog on ^B.
+                '\x14' => {
                     BrushCharacterDialog::new(self.brush.glyph).render(terminal);
                     self.mode = SketchMode::BrushCharacterDialog;
                 },
@@ -246,11 +281,11 @@ impl EventHandler for Sketch {
         let (columns, lines) = (columns as usize, lines as usize);
 
         // Add/remove lines.
-        self.content.resize(lines, vec!['\0'; columns]);
+        self.content.resize(lines, vec![Cell::default(); columns]);
 
         // Resize columns of each line.
         for line in &mut self.content {
-            line.resize(columns, '\0');
+            line.resize(columns, Cell::default());
         }
 
         // Force redraw to make sure user is up to date.
@@ -281,15 +316,30 @@ impl Display for Sketch {
 
         let mut text = String::new();
 
+        // Store colors to reduce the number of writes when nothing changes.
+        let mut foreground = Color::default();
+        let mut background = Color::default();
+        Terminal::set_color(foreground, background);
+
         for line in &self.content {
             let mut column = 0;
             while column < line.len() {
-                let c = line[column];
+                let cell = line[column];
+
+                // Restore the cell's colors
+                if cell.foreground != foreground {
+                    text.push_str(&cell.foreground.escape(true));
+                    foreground = cell.foreground;
+                }
+                if cell.background != background {
+                    text.push_str(&cell.background.escape(false));
+                    background = cell.background;
+                }
 
                 // Render empty cells as whitespace.
-                let width = c.width();
-                match c.width() {
-                    Some(1) | Some(2) => text.push(c),
+                let width = cell.c.width();
+                match width {
+                    Some(1) | Some(2) => text.push(cell.c),
                     _ => text.push(' '),
                 }
 
@@ -320,9 +370,30 @@ impl Drop for Sketch {
     }
 }
 
+/// Content of a cell in the grid.
+#[derive(Copy, Clone, Default)]
+struct Cell {
+    c: char,
+    foreground: Color,
+    background: Color,
+}
+
+impl Cell {
+    fn new(c: char, foreground: Color, background: Color) -> Self {
+        Self { c, foreground, background }
+    }
+
+    /// Reset the cell to the default content.
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// Drawing brush.
 struct Brush {
     template: Vec<Vec<bool>>,
+    foreground_color: Color,
+    background_color: Color,
     position: Point,
     glyph: char,
     size: u8,
@@ -331,6 +402,8 @@ struct Brush {
 impl Default for Brush {
     fn default() -> Self {
         Self {
+            foreground_color: Color::default(),
+            background_color: Color::default(),
             template: Self::create_template(1),
             position: Default::default(),
             glyph: '+',
@@ -396,6 +469,8 @@ enum SketchMode {
     Sketching,
     /// Brush character dialog prompt.
     BrushCharacterDialog,
+    /// Colorpicker dialog.
+    ColorpickerDialog(ColorpickerDialog),
 }
 
 impl Default for SketchMode {

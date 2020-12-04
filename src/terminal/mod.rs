@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
+use std::str::{self, FromStr};
 use std::ptr;
 
 use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
@@ -182,18 +183,11 @@ impl Terminal {
         self.modes.insert(mode, enabled);
     }
 
-    /// Set the color for the following characters.
-    // pub fn set_color(foreground: Color, background: Color) {
-    //     match foreground {
-    //         Color::Named(color) => Self::write(format!("\x1b[3{}m", color as u8)),
-    //         Color::Rgb(Rgb { r, g, b }) => Self::write(format!("\x1b[38:2:{}:{}:{}m", r, g, b)),
-    //     }
-
-    //     match background {
-    //         Color::Named(color) => Self::write(format!("\x1b[4{}m", color as u8)),
-    //         Color::Rgb(Rgb { r, g, b }) => Self::write(format!("\x1b[48:2:{}:{}:{}m", r, g, b)),
-    //     }
-    // }
+    /// Set the color for all following characters.
+    pub fn set_color(foreground: Color, background: Color) {
+        Self::write(foreground.escape(true));
+        Self::write(background.escape(false));
+    }
 
     /// Decrease intensity for the following characters.
     pub fn set_dim() {
@@ -298,7 +292,7 @@ impl Drop for Terminal {
 /// Terminal cursor shape.
 pub enum CursorShape {
     Default = 0,
-    Block = 2,
+    // Block = 2,
     Underline = 4,
     IBeam = 6,
 }
@@ -356,40 +350,72 @@ impl DerefMut for TerminalModes {
     }
 }
 
-// /// Terminal color.
-// #[derive(Copy, Clone)]
-// pub enum Color {
-//     Named(NamedColor),
-//     Rgb(Rgb),
-// }
+/// Terminal color.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Color {
+    Named(NamedColor),
+    Indexed(u8),
+    Rgb(Rgb),
+}
 
-// impl Default for Color {
-//     fn default() -> Self {
-//         Self::Named(NamedColor::Default)
-//     }
-// }
+impl Default for Color {
+    fn default() -> Self {
+        Self::Named(NamedColor::Default)
+    }
+}
 
-// /// CTerm color.
-// #[derive(Copy, Clone)]
-// pub enum NamedColor {
-//     Black = 0,
-//     Red,
-//     Green,
-//     Yellow,
-//     Blue,
-//     Magenta,
-//     Cyan,
-//     White,
-//     Default = 9,
-// }
+impl Color {
+    pub fn escape(&self, foreground: bool) -> String {
+        match (self, foreground) {
+            // Foreground:
+            (Color::Named(color), true) => format!("\x1b[3{}m", *color as u8),
+            (Color::Indexed(color), true) => format!("\x1b[38:5:{}m", color),
+            (Color::Rgb(Rgb { r, g, b }), true) => format!("\x1b[38:2:{}:{}:{}m", r, g, b),
+            // Background:
+            (Color::Named(color), false) => format!("\x1b[4{}m", *color as u8),
+            (Color::Indexed(color), false) => format!("\x1b[48:5:{}m", color),
+            (Color::Rgb(Rgb { r, g, b }), false) => format!("\x1b[48:2:{}:{}:{}m", r, g, b),
+        }
+    }
+}
 
-// /// RGB color.
-// #[derive(Copy, Clone)]
-// pub struct Rgb {
-//     r: u8,
-//     g: u8,
-//     b: u8,
-// }
+/// CTerm color.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum NamedColor {
+    // Black = 0,
+    // Red = 1,
+    // Green = 2,
+    // Yellow = 3,
+    // Blue = 4,
+    // Magenta = 5,
+    // Cyan = 6,
+    // White = 7,
+    Default = 9,
+}
+
+/// RGB color.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct Rgb {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+impl FromStr for Rgb {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 6 {
+            return Err(());
+        }
+
+        Ok(Rgb {
+            r: u8::from_str_radix(&s[0..2], 16).map_err(|_| ())?,
+            g: u8::from_str_radix(&s[2..4], 16).map_err(|_| ())?,
+            b: u8::from_str_radix(&s[4..6], 16).map_err(|_| ())?,
+        })
+    }
+}
 
 /// Enable raw terminal input handling.
 fn setup_tty() -> libc::termios {
