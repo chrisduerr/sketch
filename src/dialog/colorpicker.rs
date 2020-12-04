@@ -35,10 +35,12 @@ impl ColorpickerDialog {
         self.render(terminal);
     }
 
+    /// Color which is being changed.
     pub fn color_position(&self) -> ColorPosition {
         self.color_position
     }
 
+    /// Selected color.
     pub fn color(&self) -> Color {
         self.mode.color()
     }

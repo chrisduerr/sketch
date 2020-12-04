@@ -14,7 +14,11 @@ use crate::dialog::{BrushCharacterDialog, Dialog};
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
+/// Help text for the last line.
+const KEYBINDING_HELP: &str = "[^T] Brush glyph    [^F] Foreground color    [^B] Background color";
+
 fn main() -> io::Result<()> {
+    // Launch the application.
     Sketch::new().run()
 }
 
@@ -199,6 +203,28 @@ impl Sketch {
 
         self.mode = SketchMode::ColorpickerDialog(dialog);
     }
+
+    /// Open the dialog for brush character selection.
+    fn open_brush_character_dialog(&mut self, terminal: &mut Terminal) {
+        let dialog = BrushCharacterDialog::new(self.brush.glyph);
+        dialog.render(terminal);
+
+        self.mode = SketchMode::BrushCharacterDialog(dialog);
+    }
+
+    /// Render the keybinding help message.
+    fn render_help(&mut self) {
+        // Skip drawing if the last line has any content in it.
+        let last_line = self.content.len() - 1;
+        if self.content[last_line].iter().find(|cell| **cell != Cell::default()).is_some() {
+            return;
+        }
+
+        // Write the help message into the last line.
+        Terminal::set_color(Color::default(), Color::default());
+        Terminal::goto(0, last_line + 1);
+        Terminal::write(KEYBINDING_HELP);
+    }
 }
 
 impl EventHandler for Sketch {
@@ -207,13 +233,12 @@ impl EventHandler for Sketch {
         self.redraw(terminal);
 
         match &mut self.mode {
-            SketchMode::BrushCharacterDialog => match glyph {
-                '\n' => self.close_dialog(terminal),
-                glyph if glyph.width().unwrap_or(0) > 0 && !glyph.is_whitespace() => {
-                    BrushCharacterDialog::new(glyph).render(terminal);
-                    self.brush.glyph = glyph;
+            SketchMode::BrushCharacterDialog(dialog) => match glyph {
+                '\n' => {
+                    self.brush.glyph = dialog.glyph();
+                    self.close_dialog(terminal);
                 },
-                _ => (),
+                glyph => dialog.keyboard_input(terminal, glyph),
             },
             SketchMode::ColorpickerDialog(dialog) => match glyph {
                 '\n' => {
@@ -233,10 +258,7 @@ impl EventHandler for Sketch {
                 // Open foreground colorpicker dialog on ^F.
                 '\x06' => self.open_color_dialog(terminal, ColorPosition::Foreground),
                 // Open brush character dialog on ^B.
-                '\x14' => {
-                    BrushCharacterDialog::new(self.brush.glyph).render(terminal);
-                    self.mode = SketchMode::BrushCharacterDialog;
-                },
+                '\x14' => self.open_brush_character_dialog(terminal),
                 // Delete last character on backspace.
                 '\x7f' => self.backspace(),
                 glyph if glyph.width().unwrap_or_default() > 0 => {
@@ -304,12 +326,18 @@ impl EventHandler for Sketch {
     fn redraw(&mut self, terminal: &mut Terminal) {
         let Point { column, line } = self.brush.position;
 
-        print!("\x1b[H{}", self);
+        // Re-print the entire stored buffer.
+        Terminal::goto(1, 1);
+        Terminal::write(self.to_string());
 
         // Redraw dialogs.
-        if let SketchMode::BrushCharacterDialog = &self.mode {
-            BrushCharacterDialog::new(self.brush.glyph).render(terminal);
+        match &mut self.mode {
+            SketchMode::BrushCharacterDialog(dialog) => dialog.render(terminal),
+            SketchMode::ColorpickerDialog(dialog) => dialog.render(terminal),
+            SketchMode::Sketching => (),
         }
+
+        self.render_help();
 
         // Restore cursor position.
         Terminal::goto(column, line);
@@ -380,7 +408,7 @@ impl Drop for Sketch {
 }
 
 /// Content of a cell in the grid.
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 struct Cell {
     c: char,
     foreground: Color,
@@ -477,7 +505,7 @@ enum SketchMode {
     /// Default drawing mode.
     Sketching,
     /// Brush character dialog prompt.
-    BrushCharacterDialog,
+    BrushCharacterDialog(BrushCharacterDialog),
     /// Colorpicker dialog.
     ColorpickerDialog(ColorpickerDialog),
 }

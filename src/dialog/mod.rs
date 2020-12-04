@@ -1,4 +1,4 @@
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthStr, UnicodeWidthChar};
 
 use crate::terminal::{Color, CursorShape, Terminal, TerminalMode};
 
@@ -66,6 +66,7 @@ pub trait Dialog {
 }
 
 /// Dialog for picking a new brush glyph.
+#[derive(PartialEq, Eq)]
 pub struct BrushCharacterDialog {
     glyph: char,
 }
@@ -77,6 +78,25 @@ impl BrushCharacterDialog {
     /// user what the active glyph for the brush is.
     pub fn new(glyph: char) -> Self {
         Self { glyph }
+    }
+
+    /// Process a keystroke.
+    pub fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) {
+        // Only accept renderable non-whitespace glyphs.
+        if glyph.width().unwrap_or_default() == 0 || glyph.is_whitespace() {
+            return;
+        }
+
+        // Switch to the new glyph.
+        self.glyph = glyph;
+
+        // Update the dialog.
+        self.render(terminal);
+    }
+
+    /// The selected brush glyph.
+    pub fn glyph(&self) -> char {
+        self.glyph
     }
 }
 
