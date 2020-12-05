@@ -15,7 +15,8 @@ use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, 
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
 /// Help text for the last line.
-const KEYBINDING_HELP: &str = "[^T] Brush glyph    [^F] Foreground color    [^B] Background color    [Q] Quit";
+const KEYBINDING_HELP: &str =
+    "[^T] Brush glyph    [^F] Foreground color    [^B] Background color    [Q] Quit";
 
 fn main() -> io::Result<()> {
     // Launch the application.
@@ -189,11 +190,12 @@ impl Sketch {
     fn backspace(&mut self) {
         // Move cursor to the previous cell.
         let Point { column, line } = self.brush.position;
-        self.goto(column.saturating_sub(1), line);
+        let column = max(column.saturating_sub(1), 1);
+        self.goto(column, line);
 
         // Overwrite cell without moving cursor.
         self.write(' ', true);
-        self.goto(column.saturating_sub(1), line);
+        self.goto(column, line);
     }
 
     /// Open the dialog for color selection.
