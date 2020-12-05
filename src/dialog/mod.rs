@@ -1,4 +1,4 @@
-use unicode_width::{UnicodeWidthStr, UnicodeWidthChar};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::terminal::{Color, CursorShape, Terminal, TerminalMode};
 
