@@ -11,12 +11,12 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::dialog::colorpicker::{ColorPosition, ColorpickerDialog};
 use crate::dialog::{BrushCharacterDialog, Dialog};
-use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
+use crate::terminal::event::{ButtonState, EventHandler, MouseButton, MouseEvent};
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
 /// Help text for the last line.
 const KEYBINDING_HELP: &str =
-    "[^T] Brush glyph    [^F] Foreground color    [^B] Background color    [^C] Quit";
+    "[^T] Brush glyph  [^F] Foreground  [^B] Background  [Wheel] Brush size  [^C] Quit";
 
 fn main() -> io::Result<()> {
     // Launch the application.
@@ -291,11 +291,11 @@ impl EventHandler for Sketch {
         match event.button {
             MouseButton::Left => self.write_cursor(CursorWriteMode::Write),
             MouseButton::Right => self.write_cursor(CursorWriteMode::Erase),
-            MouseButton::Index(4) if event.modifiers.contains(Modifiers::CONTROL) => {
+            MouseButton::Index(4) => {
                 self.brush.size += 1;
                 self.brush.template = Brush::create_template(self.brush.size);
             },
-            MouseButton::Index(5) if event.modifiers.contains(Modifiers::CONTROL) => {
+            MouseButton::Index(5) => {
                 self.brush.size = max(1, self.brush.size - 1);
                 self.brush.template = Brush::create_template(self.brush.size);
             },
