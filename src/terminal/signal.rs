@@ -1,30 +1,15 @@
-use std::io;
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::Arc;
+use std::io::{self, Write};
+use std::mem;
 
-use mio::{Registry, Token, Waker};
+use mio::unix::pipe::{self, Receiver, Sender};
 
-/// Maximum signal channel size.
-///
-/// Any signal received after this bound has been reached will be silently dropped, while `mio`
-/// will still be woken up to allow processing the remaining signals.
-const CHANNEL_SIZE: usize = 512;
-
-// TODO: Using a single atomic flag for each signal would be more reliable.
-//
-/// Buffer storing all unprocessed signals.
-static mut SIGNALS: Option<SyncSender<libc::c_int>> = None;
-
-/// Waker to notify mio about new signals which require processing.
-static mut WAKER: Option<Arc<Waker>> = None;
+/// Pipe for sending signals from the handler to mio.
+static mut SIGNALS: Option<Sender> = None;
 
 /// Setup a channel for mio to check for new signals.
-pub fn mio_receiver(registry: &Registry, token: Token) -> io::Result<Receiver<libc::c_int>> {
+pub fn mio_receiver() -> io::Result<Receiver> {
     let rx = unsafe {
-        let waker = Waker::new(registry, token)?;
-        WAKER = Some(Arc::new(waker));
-
-        let (tx, rx) = mpsc::sync_channel(CHANNEL_SIZE);
+        let (tx, rx) = pipe::new()?;
         SIGNALS = Some(tx);
         rx
     };
@@ -58,11 +43,8 @@ pub fn unregister(signal: libc::c_int) -> io::Result<()> {
 
 /// POSIX signal handler for [`libc::signal`].
 unsafe extern "C" fn handler(signal: libc::c_int) {
-    if let Some(waker) = &WAKER {
-        let _ = waker.wake();
-    }
-
-    if let Some(signals) = &SIGNALS {
-        let _ = signals.try_send(signal);
+    if let Some(signals) = &mut SIGNALS {
+        let bytes = mem::transmute::<libc::c_int, [u8; 4]>(signal);
+        let _ = signals.write_all(&bytes);
     }
 }

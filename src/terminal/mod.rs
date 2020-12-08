@@ -78,7 +78,8 @@ impl Terminal {
         poll.registry().register(&mut SourceFd(&0), STDIN_TOKEN, Interest::READABLE)?;
 
         // Register signal handlers.
-        let signal_receiver = signal::mio_receiver(poll.registry(), SIGNAL_TOKEN)?;
+        let mut signal_receiver = signal::mio_receiver()?;
+        poll.registry().register(&mut signal_receiver, SIGNAL_TOKEN, Interest::READABLE)?;
         signal::register(SIGWINCH)?;
         signal::register(SIGTSTP)?;
         signal::register(SIGCONT)?;
@@ -107,7 +108,10 @@ impl Terminal {
                         }
                     },
                     SIGNAL_TOKEN => {
-                        while let Ok(signal) = signal_receiver.try_recv() {
+                        let mut signal = [0; 4];
+                        while let Ok(_) = signal_receiver.read_exact(&mut signal) {
+                            let signal = unsafe { mem::transmute::<[u8; 4], libc::c_int>(signal) };
+
                             // Handle shutdown if a signal requested it.
                             match self.handle_signal(signal) {
                                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
