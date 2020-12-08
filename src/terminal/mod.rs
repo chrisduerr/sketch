@@ -193,6 +193,11 @@ impl Terminal {
         Self::write(background.escape(false));
     }
 
+    /// Clear the terminal screen.
+    pub fn clear() {
+        Self::write("\x1b[2J");
+    }
+
     /// Decrease intensity for the following characters.
     pub fn set_dim() {
         Self::write("\x1b[2m");

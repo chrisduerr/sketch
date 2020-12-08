@@ -16,7 +16,7 @@ use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
 /// Help text for the last line.
 const KEYBINDING_HELP: &str =
-    "[^T] Brush glyph  [^F] Foreground  [^B] Background  [Wheel] Brush size  [^C] Quit";
+    "[^T] Brush glyph  [^F] Foreground  [^B] Background  [Wheel] Brush size  [^L] Clear  [^C] Quit";
 
 fn main() -> io::Result<()> {
     // Launch the application.
@@ -56,6 +56,21 @@ impl Sketch {
         // Run the terminal event loop.
         terminal.set_event_handler(Box::new(self));
         terminal.run()
+    }
+
+    /// Clear the entire screen, going back to an empty canvas.
+    fn clear(&mut self, terminal: &mut Terminal) {
+        // Reset storage.
+        let lines = self.content.len();
+        let columns = self.content[0].len();
+        self.content = vec![vec![Cell::default(); columns]; lines];
+
+        // Clear terminal.
+        Terminal::clear();
+
+        // Redraw cursor template and help message.
+        self.redraw(terminal);
+        self.preview_brush();
     }
 
     /// Move terminal cursor.
@@ -263,6 +278,8 @@ impl EventHandler for Sketch {
                 '\x14' => self.open_brush_character_dialog(terminal),
                 // Delete last character on backspace.
                 '\x7f' => self.backspace(),
+                // Clear the screen.
+                '\x0c' => self.clear(terminal),
                 glyph if glyph.width().unwrap_or_default() > 0 => {
                     // Show IBeam cursor while typing.
                     terminal.set_mode(TerminalMode::ShowCursor, true);
