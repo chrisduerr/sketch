@@ -61,11 +61,6 @@ impl Terminal {
         self.event_handler = event_handler;
     }
 
-    /// Shut the terminal event handler down.
-    pub fn quit(&mut self) {
-        self.terminated = true;
-    }
-
     /// Run the terminal event loop.
     ///
     /// This will block until the application is terminated. The `EventHandler` registered to this

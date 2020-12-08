@@ -16,7 +16,7 @@ use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
 /// Help text for the last line.
 const KEYBINDING_HELP: &str =
-    "[^T] Brush glyph    [^F] Foreground color    [^B] Background color    [Q] Quit";
+    "[^T] Brush glyph    [^F] Foreground color    [^B] Background color    [^C] Quit";
 
 fn main() -> io::Result<()> {
     // Launch the application.
@@ -243,7 +243,6 @@ impl EventHandler for Sketch {
                 glyph => dialog.keyboard_input(terminal, glyph),
             },
             SketchMode::ColorpickerDialog(dialog) => match glyph {
-                'q' => self.close_dialog(terminal),
                 // Reset to default color on ^E.
                 '\x05' => {
                     self.brush.set_color(dialog.color_position(), dialog.color());
@@ -264,7 +263,6 @@ impl EventHandler for Sketch {
                 '\x14' => self.open_brush_character_dialog(terminal),
                 // Delete last character on backspace.
                 '\x7f' => self.backspace(),
-                'q' => terminal.quit(),
                 glyph if glyph.width().unwrap_or_default() > 0 => {
                     // Show IBeam cursor while typing.
                     terminal.set_mode(TerminalMode::ShowCursor, true);
