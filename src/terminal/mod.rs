@@ -109,7 +109,7 @@ impl Terminal {
                     },
                     SIGNAL_TOKEN => {
                         let mut signal = [0; 4];
-                        while let Ok(_) = signal_receiver.read_exact(&mut signal) {
+                        while signal_receiver.read_exact(&mut signal).is_ok() {
                             let signal = unsafe { mem::transmute::<[u8; 4], libc::c_int>(signal) };
 
                             // Handle shutdown if a signal requested it.

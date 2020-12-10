@@ -92,7 +92,7 @@ impl ColorpickerMode {
     fn color(&self) -> Color {
         match self {
             Self::CTerm(color) => Color::Indexed(*color),
-            Self::Rgb(color) => Rgb::from_str(color).map(|rgb| Color::Rgb(rgb)).unwrap_or_default(),
+            Self::Rgb(color) => Rgb::from_str(color).map(Color::Rgb).unwrap_or_default(),
         }
     }
 

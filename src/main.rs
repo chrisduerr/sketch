@@ -139,7 +139,7 @@ impl Sketch {
         // Write the cursor characters.
         for line in 0..brush_height {
             let target_line = origin_line + line as isize;
-            let skip = usize::try_from(origin_column * -1 + 1).unwrap_or_default();
+            let skip = usize::try_from(-origin_column + 1).unwrap_or_default();
             let first_occupied = self.brush.template[line].iter().skip(skip).position(|b| *b);
 
             // Skip this line if there is no occupied cell within the grid.
@@ -233,7 +233,7 @@ impl Sketch {
     fn render_help(&mut self) {
         // Skip drawing if the last line has any content in it.
         let last_line = self.content.len() - 1;
-        if self.content[last_line].iter().find(|cell| **cell != Cell::default()).is_some() {
+        if self.content[last_line].iter().any(|cell| *cell != Cell::default()) {
             return;
         }
 
@@ -507,17 +507,17 @@ impl Brush {
 
         let mid_point = (size - 1) as f32 / 2.;
         let mut num_occupied = size;
-        for line in 0..height {
+        for (i, line) in cursor.iter_mut().enumerate().take(height) {
             // Set all occupied bits in the current line.
             for column in 0..num_occupied {
                 let column = (width - num_occupied) / 2 + column;
-                cursor[line][column] = true;
+                line[column] = true;
             }
 
             // Increment/Decrement based on current line in hexagon.
-            if line as f32 + 1. < mid_point {
+            if i as f32 + 1. < mid_point {
                 num_occupied += 2;
-            } else if line as f32 + 1. > mid_point {
+            } else if i as f32 + 1. > mid_point {
                 num_occupied -= 2;
             }
         }
