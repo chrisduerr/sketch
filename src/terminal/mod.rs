@@ -220,6 +220,11 @@ impl Terminal {
         let _ = stdout.flush();
     }
 
+    /// Repeat the last character `count` times.
+    pub fn repeat(count: usize) {
+        Self::write(format!("\x1b[{}b", count));
+    }
+
     /// Move the cursor to a specific point in the grid.
     ///
     /// The indexing for both column and line is 1-based.

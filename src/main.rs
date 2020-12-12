@@ -1,7 +1,7 @@
 mod dialog;
 mod terminal;
 
-use std::cmp::max;
+use std::cmp::{min, max};
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::io;
@@ -85,6 +85,15 @@ impl Sketch {
     /// application state. This is used to clear things from the grid which are not part of the
     /// sketch (like the cursor preview).
     fn write(&mut self, c: char, persist: bool) {
+        self.write_many(c, 1, persist);
+    }
+
+    /// Write the same character multiple times.
+    ///
+    /// This is a version of [`write`] optimized to repeat the same character many times.
+    fn write_many(&mut self, c: char, count: usize, persist: bool) {
+        assert!(count > 0);
+
         // Verify that the glyph is a printable character.
         let width = match c.width() {
             Some(width) if width > 0 => width,
@@ -93,7 +102,7 @@ impl Sketch {
 
         let Point { column, line } = self.brush.position;
 
-        // Verify the write is within the grid.
+        // Verify the first cell write is within the grid.
         if self.content.len() < line || self.content[line - 1].len() + 1 < column + width {
             return;
         }
@@ -102,18 +111,21 @@ impl Sketch {
         let foreground = self.brush.foreground_color;
         let background = self.brush.background_color;
         if persist {
-            // Replace the glyph itself.
             let line = &mut self.content[line - 1];
-            line[column - 1] = Cell::new(c, foreground, background);
+            let max = min(column + (count - 1) * width + 1, line.len());
+            for column in (column..max).step_by(width) {
+                // Replace the glyph itself.
+                line[column - 1] = Cell::new(c, foreground, background);
 
-            // Reset the following character when writing fullwidth characters.
-            if width == 2 {
-                line[column].clear();
-            }
+                // Reset the following character when writing fullwidth characters.
+                if width == 2 {
+                    line[column].clear();
+                }
 
-            // Replace previous fullwidth character if we're writing inside its spacer.
-            if column >= 2 && line[column - 2].c.width() == Some(2) {
-                line[column - 2].clear();
+                // Replace previous fullwidth character if we're writing inside its spacer.
+                if column >= 2 && line[column - 2].c.width() == Some(2) {
+                    line[column - 2].clear();
+                }
             }
         }
 
@@ -121,8 +133,13 @@ impl Sketch {
         Terminal::set_color(foreground, background);
 
         // Write to the terminal.
-        self.brush.position.column += width;
+        self.brush.position.column += width * count;
         Terminal::write(c);
+
+        // Use the terminal escape to repeat the character.
+        if count > 1 {
+            Terminal::repeat(count);
+        }
     }
 
     /// Write the cursor's content at its current location.
@@ -154,26 +171,22 @@ impl Sketch {
             let first_column = (origin_column + first_occupied as isize) as usize;
             self.goto(first_column, target_line as usize);
 
-            // Ignore every second cell for fullwidth brushes.
-            let step_size = self.brush.glyph.width().unwrap_or(1);
-            for column in (first_occupied..brush_width).step_by(step_size) {
-                // Stop once we've reached the end of the current line.
-                if !self.brush.template[line][column] {
-                    break;
-                }
+            // Get the last non-empty cell in the brush.
+            let last_occupied = self.brush.template[line].iter().rposition(|occ| *occ).unwrap_or(0);
 
-                match mode {
-                    CursorWriteMode::WriteVolatile => self.write(self.brush.glyph, false),
-                    CursorWriteMode::Write => self.write(self.brush.glyph, true),
-                    CursorWriteMode::Erase => {
-                        // Overwrite characters with default background set.
-                        let background = mem::take(&mut self.brush.background_color);
-                        for _ in 0..step_size {
-                            self.write(' ', true);
-                        }
-                        self.brush.background_color = background;
-                    },
-                }
+            // Ignore every second cell for fullwidth brushes.
+            let width = self.brush.glyph.width().unwrap_or(1);
+            let columns = (last_occupied + width - first_occupied) / width;
+
+            match mode {
+                CursorWriteMode::WriteVolatile => self.write_many(self.brush.glyph, columns, false),
+                CursorWriteMode::Write => self.write_many(self.brush.glyph, columns, true),
+                CursorWriteMode::Erase => {
+                    // Overwrite characters with default background set.
+                    let background = mem::take(&mut self.brush.background_color);
+                    self.write_many(' ', columns * width, true);
+                    self.brush.background_color = background;
+                },
             }
         }
 
