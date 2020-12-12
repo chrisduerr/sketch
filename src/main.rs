@@ -1,7 +1,7 @@
 mod dialog;
 mod terminal;
 
-use std::cmp::{min, max};
+use std::cmp::{max, min};
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::io;
@@ -108,8 +108,8 @@ impl Sketch {
         }
 
         // Store character in the grid state.
-        let foreground = self.brush.foreground_color;
-        let background = self.brush.background_color;
+        let foreground = self.brush.foreground;
+        let background = self.brush.background;
         if persist {
             let line = &mut self.content[line - 1];
             let max = min(column + (count - 1) * width + 1, line.len());
@@ -183,9 +183,9 @@ impl Sketch {
                 CursorWriteMode::Write => self.write_many(self.brush.glyph, columns, true),
                 CursorWriteMode::Erase => {
                     // Overwrite characters with default background set.
-                    let background = mem::take(&mut self.brush.background_color);
+                    let background = mem::take(&mut self.brush.background);
                     self.write_many(' ', columns * width, true);
-                    self.brush.background_color = background;
+                    self.brush.background = background;
                 },
             }
         }
@@ -228,7 +228,8 @@ impl Sketch {
 
     /// Open the dialog for color selection.
     fn open_color_dialog(&mut self, terminal: &mut Terminal, color_position: ColorPosition) {
-        let dialog = ColorpickerDialog::new(color_position);
+        let dialog =
+            ColorpickerDialog::new(color_position, self.brush.foreground, self.brush.background);
         dialog.render(terminal);
 
         self.mode = SketchMode::ColorpickerDialog(dialog);
@@ -461,8 +462,8 @@ impl Cell {
 /// Drawing brush.
 struct Brush {
     template: Vec<Vec<bool>>,
-    foreground_color: Color,
-    background_color: Color,
+    foreground: Color,
+    background: Color,
     position: Point,
     glyph: char,
     size: u8,
@@ -471,8 +472,8 @@ struct Brush {
 impl Default for Brush {
     fn default() -> Self {
         Self {
-            foreground_color: Color::default(),
-            background_color: Color::default(),
+            foreground: Color::default(),
+            background: Color::default(),
             template: Self::create_template(1),
             position: Default::default(),
             glyph: '+',
@@ -485,8 +486,8 @@ impl Brush {
     /// Update the brushe's colors.
     fn set_color(&mut self, position: ColorPosition, color: Color) {
         match position {
-            ColorPosition::Foreground => self.foreground_color = color,
-            ColorPosition::Background => self.background_color = color,
+            ColorPosition::Foreground => self.foreground = color,
+            ColorPosition::Background => self.background = color,
         }
     }
 

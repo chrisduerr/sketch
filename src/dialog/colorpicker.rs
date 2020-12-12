@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
 use crate::dialog::Dialog;
-use crate::terminal::{Color, Rgb, Terminal};
+use crate::terminal::{Color, NamedColor, Rgb, Terminal};
 
 /// Message prompt of the colorpicker dialog.
 const COLORPICKER_DIALOG_PROMPT: &str = "Pick a color: ";
@@ -14,11 +14,18 @@ const COLORPICKER_DIALOG_HELP: &str = "[^R] RGB    [^T] CTerm    [^E] Default";
 pub struct ColorpickerDialog {
     color_position: ColorPosition,
     mode: ColorpickerMode,
+    foreground: Color,
+    background: Color,
 }
 
 impl ColorpickerDialog {
-    pub fn new(color_position: ColorPosition) -> Self {
-        Self { mode: ColorpickerMode::default(), color_position }
+    pub fn new(color_position: ColorPosition, foreground: Color, background: Color) -> Self {
+        let mode = match color_position {
+            ColorPosition::Foreground => foreground.into(),
+            ColorPosition::Background => background.into(),
+        };
+
+        Self { mode, color_position, foreground, background }
     }
 
     /// Process a keystroke.
@@ -57,8 +64,8 @@ impl Dialog for ColorpickerDialog {
 
     fn box_color(&self) -> (Color, Color) {
         match self.color_position {
-            ColorPosition::Foreground => (self.color(), Color::default()),
-            ColorPosition::Background => (Color::default(), self.color()),
+            ColorPosition::Foreground => (self.color(), self.background),
+            ColorPosition::Background => (self.foreground, self.color()),
         }
     }
 }
@@ -135,6 +142,17 @@ impl Display for ColorpickerMode {
         match self {
             Self::Rgb(color) => write!(f, "#{: <1}", color),
             Self::CTerm(color) => write!(f, "{: >3}", color),
+        }
+    }
+}
+
+impl From<Color> for ColorpickerMode {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::Named(NamedColor::Default) => Self::default(),
+            // Color::Named(color) => Self::CTerm(color as u8),
+            Color::Indexed(index) => Self::CTerm(index),
+            Color::Rgb(Rgb { r, g, b }) => Self::Rgb(format!("{:02x}{:02x}{:02x}", r, g, b)),
         }
     }
 }
