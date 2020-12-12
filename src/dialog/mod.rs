@@ -42,7 +42,8 @@ pub trait Dialog {
 
             // Write the text itself without colors.
             Terminal::set_color(Color::default(), Color::default());
-            Terminal::write(format!(" {: <1$} ", text, max_width - 4));
+            let padding = " ".repeat(max_width - text.width() - 4);
+            Terminal::write(format!(" {}{} ", text, padding));
 
             // Write a colored box drawing character.
             Terminal::set_color(box_color.0, box_color.1);
