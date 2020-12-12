@@ -47,6 +47,7 @@ impl Sketch {
         terminal.set_mode(TerminalMode::AltScreen, true);
         terminal.set_mode(TerminalMode::SgrMouse, true);
         terminal.set_mode(TerminalMode::MouseMotion, true);
+        terminal.set_mode(TerminalMode::FocusInOut, true);
         Terminal::goto(0, 0);
 
         // Resize internal buffer to fit terminal dimensions.
@@ -374,6 +375,13 @@ impl EventHandler for Sketch {
 
         // Restore cursor position.
         Terminal::goto(column, line);
+    }
+
+    fn focus_changed(&mut self, terminal: &mut Terminal, focus: bool) {
+        // Hide mouse brush while unfocused.
+        if !focus {
+            self.redraw(terminal);
+        }
     }
 }
 

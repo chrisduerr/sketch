@@ -330,6 +330,7 @@ pub enum TerminalMode {
     ShowCursor = 25,
     SgrMouse = 1006,
     MouseMotion = 1003,
+    FocusInOut = 1004,
     AltScreen = 1049,
 }
 
@@ -344,6 +345,7 @@ impl Default for TerminalModes {
         modes.insert(TerminalMode::ShowCursor, true);
         modes.insert(TerminalMode::SgrMouse, false);
         modes.insert(TerminalMode::MouseMotion, false);
+        modes.insert(TerminalMode::FocusInOut, false);
         modes.insert(TerminalMode::AltScreen, false);
 
         Self(modes)

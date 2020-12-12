@@ -26,6 +26,12 @@ impl Perform for Terminal {
                     self.handle_event(|handler, terminal| handler.mouse_input(terminal, event));
                 }
             },
+            ('I', _) => {
+                self.handle_event(|handler, terminal| handler.focus_changed(terminal, true));
+            },
+            ('O', _) => {
+                self.handle_event(|handler, terminal| handler.focus_changed(terminal, false));
+            },
             _ => (),
         }
     }

@@ -17,6 +17,9 @@ pub trait EventHandler {
     /// Since some actions can clear the terminal, like recovering from a suspension, this event is
     /// emitted whenever the application state should be rendered again.
     fn redraw(&mut self, _terminal: &mut Terminal) {}
+
+    /// Terminal focus has changed.
+    fn focus_changed(&mut self, _terminal: &mut Terminal, _focus: bool) {}
 }
 
 /// Dummy event handler implementation.
