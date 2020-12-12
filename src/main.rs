@@ -323,7 +323,7 @@ impl EventHandler for Sketch {
             MouseButton::Left => self.write_cursor(CursorWriteMode::Write),
             MouseButton::Right => self.write_cursor(CursorWriteMode::Erase),
             MouseButton::Index(4) => {
-                self.brush.size += 1;
+                self.brush.size = self.brush.size.saturating_add(1);
                 self.brush.template = Brush::create_template(self.brush.size);
             },
             MouseButton::Index(5) => {
