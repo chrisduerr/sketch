@@ -151,7 +151,7 @@ impl Sketch {
 
         // Use the terminal escape to repeat the character.
         if count > 1 {
-            Terminal::repeat(count);
+            Terminal::repeat(count - 1);
         }
     }
 
