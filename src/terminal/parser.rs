@@ -11,7 +11,7 @@ impl Perform for Terminal {
     fn execute(&mut self, byte: u8) {
         match byte {
             // Handle Ctrl+D.
-            4 => self.terminated = true,
+            4 => self.handle_event(|handler, terminal| handler.shutdown(terminal)),
             b => self.handle_event(|handler, terminal| handler.keyboard_input(terminal, b as char)),
         }
     }

@@ -90,7 +90,7 @@ impl Terminal {
         // Reserve buffer for reading from STDIN.
         let mut buf = [0; u16::max_value() as usize];
 
-        'event_loop: while !self.terminated {
+        while !self.terminated {
             // Stop if we run into a polling error we cannot handle ourselves.
             if let Err(err) = poll.poll(&mut events, None) {
                 if err.kind() != io::ErrorKind::Interrupted {
@@ -111,15 +111,7 @@ impl Terminal {
                         let mut signal = [0; 4];
                         while signal_receiver.read_exact(&mut signal).is_ok() {
                             let signal = unsafe { mem::transmute::<[u8; 4], libc::c_int>(signal) };
-
-                            // Handle shutdown if a signal requested it.
-                            match self.handle_signal(signal) {
-                                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                                    break 'event_loop
-                                },
-                                err @ Err(_) => return err,
-                                _ => (),
-                            }
+                            self.handle_signal(signal)?;
                         }
                     },
                     _ => unreachable!(),
@@ -130,6 +122,11 @@ impl Terminal {
         Ok(())
     }
 
+    /// Shutdown the terminal event handler.
+    pub fn shutdown(&mut self) {
+        self.terminated = true;
+    }
+
     /// Handle a POSIX signal.
     ///
     /// # Errors
@@ -138,7 +135,10 @@ impl Terminal {
     /// application shutdown.
     fn handle_signal(&mut self, signal: libc::c_int) -> io::Result<()> {
         match signal {
-            SIGINT | SIGHUP | SIGTERM => return Err(io::ErrorKind::Interrupted.into()),
+            // Request a shutdown on INT/HUP/TERM.
+            SIGINT | SIGHUP | SIGTERM => {
+                self.handle_event(|handler, terminal| handler.shutdown(terminal));
+            },
             // Handle terminal resize.
             SIGWINCH => self.update_size(),
             SIGCONT => {

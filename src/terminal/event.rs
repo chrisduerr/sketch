@@ -20,6 +20,13 @@ pub trait EventHandler {
 
     /// Terminal focus has changed.
     fn focus_changed(&mut self, _terminal: &mut Terminal, _focus: bool) {}
+
+    /// Shutdown request.
+    ///
+    /// By default this will terminate the terminal event loop by calling [`Terminal::shutdown`].
+    fn shutdown(&mut self, terminal: &mut Terminal) {
+        terminal.shutdown();
+    }
 }
 
 /// Dummy event handler implementation.

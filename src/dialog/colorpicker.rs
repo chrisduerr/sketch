@@ -1,6 +1,8 @@
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::dialog::Dialog;
 use crate::terminal::{Color, NamedColor, Rgb, Terminal};
 
@@ -67,6 +69,17 @@ impl Dialog for ColorpickerDialog {
             ColorPosition::Foreground => (self.color(), self.background),
             ColorPosition::Background => (self.foreground, self.color()),
         }
+    }
+
+    fn cursor_position(&self, lines: &[String]) -> Option<(usize, usize)> {
+        let mut line_len = lines.get(0).map(|line| line.width()).unwrap_or_default();
+
+        // Move below 0 when the first digit hasn't been picked yet.
+        if let ColorpickerMode::CTerm(0) = self.mode {
+            line_len -= 1;
+        }
+
+        Some((line_len, 0))
     }
 }
 
@@ -140,8 +153,8 @@ impl ColorpickerMode {
 impl Display for ColorpickerMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Rgb(color) => write!(f, "#{: <1}", color),
-            Self::CTerm(color) => write!(f, "{: >3}", color),
+            Self::Rgb(color) => write!(f, "#{}", color),
+            Self::CTerm(color) => write!(f, "{}", color),
         }
     }
 }

@@ -1,11 +1,10 @@
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use crate::terminal::{Color, CursorShape, Terminal, TerminalMode};
 
+pub mod brush_character;
 pub mod colorpicker;
-
-/// Message prompt of the brush character picker dialog.
-const BRUSH_CHARACTER_DIALOG_PROMPT: &str = "Pick a brush character: ";
+pub mod save;
 
 pub trait Dialog {
     fn lines(&self) -> Vec<String>;
@@ -13,6 +12,13 @@ pub trait Dialog {
     /// Foreground and background for the box drawing characters.
     fn box_color(&self) -> (Color, Color) {
         (Color::default(), Color::default())
+    }
+
+    /// Cursor position relative to the top left corner of the dialog content.
+    ///
+    /// If this is `None`, the cursor will not be visible in the dialog.
+    fn cursor_position(&self, _lines: &[String]) -> Option<(usize, usize)> {
+        None
     }
 
     /// Render the dialog to the terminal.
@@ -56,53 +62,19 @@ pub trait Dialog {
         Terminal::goto(column, line);
         Terminal::write(format!("└{}┘", "─".repeat(max_width - 2)));
 
+        let (cursor_column, cursor_line) = match self.cursor_position(&lines) {
+            Some(position) => position,
+            None => {
+                terminal.set_mode(TerminalMode::ShowCursor, false);
+                return;
+            },
+        };
+
         // Show the terminal cursor.
         terminal.set_mode(TerminalMode::ShowCursor, true);
         Terminal::set_cursor_shape(CursorShape::Underline);
 
         // Always put the cursor at the last cell in the first line.
-        let line_len = lines.get(0).map(|line| line.width()).unwrap_or_default();
-        Terminal::goto(column + line_len + 1, line - lines.len());
-    }
-}
-
-/// Dialog for picking a new brush glyph.
-#[derive(PartialEq, Eq)]
-pub struct BrushCharacterDialog {
-    glyph: char,
-}
-
-impl BrushCharacterDialog {
-    /// Create a new brush character dialog.
-    ///
-    /// The brush character `glyph` will be rendered at the end of the prompt to indicate to the
-    /// user what the active glyph for the brush is.
-    pub fn new(glyph: char) -> Self {
-        Self { glyph }
-    }
-
-    /// Process a keystroke.
-    pub fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) {
-        // Only accept renderable non-whitespace glyphs.
-        if glyph.width().unwrap_or_default() == 0 || glyph.is_whitespace() {
-            return;
-        }
-
-        // Switch to the new glyph.
-        self.glyph = glyph;
-
-        // Update the dialog.
-        self.render(terminal);
-    }
-
-    /// The selected brush glyph.
-    pub fn glyph(&self) -> char {
-        self.glyph
-    }
-}
-
-impl Dialog for BrushCharacterDialog {
-    fn lines(&self) -> Vec<String> {
-        vec![format!("{}{}", BRUSH_CHARACTER_DIALOG_PROMPT, self.glyph)]
+        Terminal::goto(column + 2 + cursor_column, line - lines.len() + cursor_line);
     }
 }

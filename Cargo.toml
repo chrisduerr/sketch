@@ -8,5 +8,6 @@ edition = "2018"
 vte = { git = "https://github.com/alacritty/vte", default-features = false }
 mio = { version = "0.7.6", features = ["os-ext"] }
 unicode-width = "0.1.8"
+structopt = "0.3.21"
 bitflags = "1.2.1"
 libc = "0.2.77"

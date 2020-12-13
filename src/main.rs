@@ -1,16 +1,22 @@
+mod cli;
 mod dialog;
 mod terminal;
 
 use std::cmp::{max, min};
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
-use std::io;
+use std::fs::File;
+use std::io::{self, Write};
 use std::mem;
 
+use structopt::StructOpt;
 use unicode_width::UnicodeWidthChar;
 
+use crate::cli::Options;
+use crate::dialog::brush_character::BrushCharacterDialog;
 use crate::dialog::colorpicker::{ColorPosition, ColorpickerDialog};
-use crate::dialog::{BrushCharacterDialog, Dialog};
+use crate::dialog::save::SaveDialog;
+use crate::dialog::Dialog;
 use crate::terminal::event::{ButtonState, EventHandler, MouseButton, MouseEvent};
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
@@ -24,17 +30,23 @@ fn main() -> io::Result<()> {
 }
 
 /// Sketch application state.
-#[derive(Default)]
 struct Sketch {
     content: Vec<Vec<Cell>>,
     mode: SketchMode,
     brush: Brush,
+
+    options: Options,
 }
 
 impl Sketch {
     /// Setup the Sketch application state.
     fn new() -> Self {
-        Self::default()
+        Self {
+            options: Options::from_args(),
+            content: Default::default(),
+            mode: Default::default(),
+            brush: Default::default(),
+        }
     }
 
     /// Run the terminal event loop.
@@ -244,6 +256,14 @@ impl Sketch {
         self.mode = SketchMode::BrushCharacterDialog(dialog);
     }
 
+    /// Open the dialog for picking the save path.
+    fn open_save_dialog(&mut self, terminal: &mut Terminal) {
+        self.mode = SketchMode::SaveDialog(SaveDialog::new());
+
+        // Redraw the entire terminal to clear previous dialogs.
+        self.redraw(terminal);
+    }
+
     /// Render the keybinding help message.
     fn render_help(&mut self) {
         // Skip drawing if the last line has any content in it.
@@ -284,6 +304,13 @@ impl EventHandler for Sketch {
                 },
                 glyph => dialog.keyboard_input(terminal, glyph),
             },
+            SketchMode::SaveDialog(dialog) => match glyph {
+                '\n' => {
+                    self.options.output = dialog.path();
+                    terminal.shutdown();
+                },
+                glyph => dialog.keyboard_input(terminal, glyph),
+            },
             SketchMode::Sketching => match glyph {
                 // Open background colorpicker dialog on ^B.
                 '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),
@@ -310,6 +337,7 @@ impl EventHandler for Sketch {
     fn mouse_input(&mut self, terminal: &mut Terminal, event: MouseEvent) {
         // Ignore mouse release events.
         if event.button_state == ButtonState::Released || self.mode != SketchMode::Sketching {
+            self.brush.position = Point { column: event.column, line: event.line };
             return;
         }
 
@@ -364,23 +392,32 @@ impl EventHandler for Sketch {
         Terminal::goto(1, 1);
         Terminal::write(self.to_string());
 
-        // Redraw dialogs.
-        match &mut self.mode {
-            SketchMode::BrushCharacterDialog(dialog) => dialog.render(terminal),
-            SketchMode::ColorpickerDialog(dialog) => dialog.render(terminal),
-            SketchMode::Sketching => (),
-        }
-
         self.render_help();
 
         // Restore cursor position.
         Terminal::goto(column, line);
+
+        // Redraw dialogs.
+        match &mut self.mode {
+            SketchMode::BrushCharacterDialog(dialog) => dialog.render(terminal),
+            SketchMode::ColorpickerDialog(dialog) => dialog.render(terminal),
+            SketchMode::SaveDialog(dialog) => dialog.render(terminal),
+            SketchMode::Sketching => (),
+        }
     }
 
     fn focus_changed(&mut self, terminal: &mut Terminal, focus: bool) {
         // Hide mouse brush while unfocused.
         if !focus {
             self.redraw(terminal);
+        }
+    }
+
+    fn shutdown(&mut self, terminal: &mut Terminal) {
+        match self.mode {
+            SketchMode::SaveDialog(_) => (),
+            _ if self.options.output.is_some() => terminal.shutdown(),
+            _ => self.open_save_dialog(terminal),
         }
     }
 }
@@ -434,7 +471,7 @@ impl Display for Sketch {
 impl Drop for Sketch {
     /// Print the sketch to primary screen after quitting.
     fn drop(&mut self) {
-        let text = self.to_string();
+        let mut text = self.to_string();
 
         // Find the first non-empty line.
         let start_offset = text
@@ -443,8 +480,27 @@ impl Drop for Sketch {
             .take_while(|&(_, c)| c.is_whitespace())
             .fold(0, |acc, (i, c)| if c == '\n' { i + 1 } else { acc });
 
-        // Print sketch without empty lines above or below it.
-        println!("{}", text[start_offset..].trim_end());
+        // Remove empty lines above or below the sketch.
+        text = text[start_offset..].trim_end().to_owned();
+        text.push('\n');
+
+        // Don't bother with empty sketches.
+        if text.is_empty() {
+            return;
+        }
+
+        // Attempt to write result to file.
+        let write_result = self
+            .options
+            .output
+            .as_ref()
+            .and_then(|output| File::create(output).ok())
+            .and_then(|mut file| file.write_all(text.as_bytes()).ok());
+
+        // Write to stdout if file isn't available.
+        if write_result.is_none() {
+            print!("{}", text);
+        }
     }
 }
 
@@ -557,6 +613,8 @@ enum SketchMode {
     BrushCharacterDialog(BrushCharacterDialog),
     /// Colorpicker dialog.
     ColorpickerDialog(ColorpickerDialog),
+    /// Save dialog.
+    SaveDialog(SaveDialog),
 }
 
 impl Default for SketchMode {
