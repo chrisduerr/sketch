@@ -125,8 +125,8 @@ impl Sketch {
         let background = self.brush.background;
         if persist {
             let line = &mut self.content[line - 1];
-            let max = min(column + (count - 1) * width + 1, line.len());
-            for column in (column..max).step_by(width) {
+            let max = min(column + (count - 1) * width, line.len());
+            for column in (column..=max).step_by(width) {
                 // Replace the glyph itself.
                 line[column - 1] = Cell::new(c, foreground, background);
 
