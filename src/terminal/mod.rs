@@ -135,8 +135,10 @@ impl Terminal {
     /// application shutdown.
     fn handle_signal(&mut self, signal: libc::c_int) -> io::Result<()> {
         match signal {
-            // Request a shutdown on INT/HUP/TERM.
-            SIGINT | SIGHUP | SIGTERM => {
+            // Try to tear everything down nicely when the controlling terminal died.
+            SIGHUP => return Err(io::ErrorKind::BrokenPipe.into()),
+            // Allow application to handle SIGINT/SIGTERM shutdown requests.
+            SIGINT | SIGTERM => {
                 self.handle_event(|handler, terminal| handler.shutdown(terminal));
             },
             // Handle terminal resize.
