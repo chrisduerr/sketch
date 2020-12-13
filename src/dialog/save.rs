@@ -42,7 +42,11 @@ impl SaveDialog {
     /// The selected save path.
     pub fn path(&self) -> Option<PathBuf> {
         let path = self.path.trim();
-        (!path.is_empty()).then(|| PathBuf::from(path))
+        if path.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(path))
+        }
     }
 }
 
