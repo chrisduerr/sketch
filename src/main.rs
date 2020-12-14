@@ -17,12 +17,12 @@ use crate::dialog::brush_character::BrushCharacterDialog;
 use crate::dialog::colorpicker::{ColorPosition, ColorpickerDialog};
 use crate::dialog::save::SaveDialog;
 use crate::dialog::Dialog;
-use crate::terminal::event::{ButtonState, EventHandler, MouseButton, MouseEvent};
+use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
 /// Help text for the last line.
-const KEYBINDING_HELP: &str =
-    "[^T] Brush glyph  [^F] Foreground  [^B] Background  [Wheel] Brush size  [^L] Clear  [^C] Quit";
+const KEYBINDING_HELP: &str = "[^T] Brush glyph  [^F] Foreground  [^B] Background  [CTRL] \
+                               Line/Box drawing  [Wheel] Brush size  [^L] Clear  [^C] Quit";
 
 fn main() -> io::Result<()> {
     // Launch the application.
@@ -31,11 +31,17 @@ fn main() -> io::Result<()> {
 
 /// Sketch application state.
 struct Sketch {
+    /// Content of the terminal grid.
     content: Vec<Vec<Cell>>,
-    mode: SketchMode,
-    brush: Brush,
 
+    /// CLI config.
     options: Options,
+
+    /// Current application mode.
+    mode: SketchMode,
+
+    /// Mouse cursor brush used for drawing.
+    brush: Brush,
 }
 
 impl Sketch {
@@ -105,7 +111,9 @@ impl Sketch {
     ///
     /// This is a version of [`write`] optimized to repeat the same character many times.
     fn write_many(&mut self, c: char, count: usize, persist: bool) {
-        assert!(count > 0);
+        if count == 0 {
+            return;
+        }
 
         // Verify that the glyph is a printable character.
         let width = match c.width() {
@@ -155,8 +163,8 @@ impl Sketch {
         }
     }
 
-    /// Write the cursor's content at its current location.
-    fn write_cursor(&mut self, mode: CursorWriteMode) {
+    /// Write the brush's content at its current location.
+    fn write_brush(&mut self, mode: WriteMode) {
         let last_line = self.content.len() as isize;
         let cursor_position = self.brush.position;
 
@@ -192,9 +200,9 @@ impl Sketch {
             let columns = (last_occupied + width - first_occupied) / width;
 
             match mode {
-                CursorWriteMode::WriteVolatile => self.write_many(self.brush.glyph, columns, false),
-                CursorWriteMode::Write => self.write_many(self.brush.glyph, columns, true),
-                CursorWriteMode::Erase => {
+                WriteMode::WriteVolatile => self.write_many(self.brush.glyph, columns, false),
+                WriteMode::Write => self.write_many(self.brush.glyph, columns, true),
+                WriteMode::Erase => {
                     // Overwrite characters with default background set.
                     let background = mem::take(&mut self.brush.background);
                     self.write_many(' ', columns * width, true);
@@ -207,10 +215,116 @@ impl Sketch {
         self.goto(cursor_position.column, cursor_position.line);
     }
 
-    // Preview the sketching brush using the dim colors.
+    // Preview the brush using dim colors.
     fn preview_brush(&mut self) {
         Terminal::set_dim();
-        self.write_cursor(CursorWriteMode::WriteVolatile);
+        self.write_brush(WriteMode::WriteVolatile);
+        Terminal::reset_sgr();
+    }
+
+    /// Write a box.
+    fn write_box(&mut self, mut start: Point, mut end: Point, mode: WriteMode) {
+        // Erasing line drawing mode does not exist.
+        if mode == WriteMode::Erase {
+            return;
+        }
+        let persistent = mode == WriteMode::Write;
+
+        let cursor_position = self.brush.position;
+
+        // Ensure start is always at the top left corner of the box.
+        if start.column > end.column {
+            mem::swap(&mut start.column, &mut end.column);
+        }
+        if start.line > end.line {
+            mem::swap(&mut start.line, &mut end.line);
+        }
+
+        // Write box drawing characters for first and last line.
+        self.goto(start.column, start.line);
+        if start.column == end.column && start.line == end.line {
+            // Single cell box.
+            self.write('┼', persistent);
+        } else if start.column == end.column {
+            // Vertical line.
+            self.write('┬', persistent);
+            self.goto(start.column, end.line);
+            self.write('┴', persistent);
+        } else if start.line == end.line {
+            // Horizontal line.
+            self.write('├', persistent);
+            if end.column - start.column > 1 {
+                self.write_many('─', end.column - start.column - 1, persistent);
+            }
+            self.write('┤', persistent);
+        } else {
+            // Full box.
+            self.write('┌', persistent);
+            self.write_many('─', end.column - start.column - 1, persistent);
+            self.write('┐', persistent);
+
+            self.goto(start.column, end.line);
+            self.write('└', persistent);
+            self.write_many('─', end.column - start.column - 1, persistent);
+            self.write('┘', persistent);
+        };
+
+        // Draw the sides of the box.
+        for line in (start.line..end.line).skip(1) {
+            self.goto(start.column, line);
+            self.write('│', persistent);
+            self.goto(end.column, line);
+            self.write('│', persistent);
+        }
+
+        // Restore cursor position.
+        self.goto(cursor_position.column, cursor_position.line);
+    }
+
+    /// Preview the box using dim colors.
+    fn preview_box(&mut self, start: Point, end: Point) {
+        Terminal::set_dim();
+        self.write_box(start, end, WriteMode::WriteVolatile);
+        Terminal::reset_sgr();
+    }
+
+    /// Write a one-dimensional line.
+    fn write_line(&mut self, start: Point, end: Point, mode: WriteMode) {
+        // Erasing line drawing mode does not exist.
+        if mode == WriteMode::Erase {
+            return;
+        }
+        let persistent = mode == WriteMode::Write;
+
+        let cursor_position = self.brush.position;
+
+        // Check the brush travel in X and Y direction.
+        let min_column = min(start.column, end.column);
+        let column_delta = max(start.column, end.column) - min_column;
+        let min_line = min(start.line, end.line);
+        let max_line = max(start.line, end.line);
+        let line_delta = max_line - min_line;
+
+        // Write the line.
+        if column_delta >= line_delta * 2 {
+            self.goto(min_column, start.line);
+            let count = (column_delta + 1) / self.brush.glyph.width().unwrap_or(1);
+            self.write_many(self.brush.glyph, count, persistent);
+        } else {
+            for line in min_line..=max_line {
+                self.goto(start.column, line);
+                self.write(self.brush.glyph, persistent);
+            }
+        }
+
+        // Restore cursor position.
+        self.goto(cursor_position.column, cursor_position.line);
+    }
+
+    /// Preview the line using dim colors.
+    fn preview_line(&mut self, start: Point, end: Point) {
+        Terminal::set_dim();
+        self.write_line(start, end, WriteMode::WriteVolatile);
         Terminal::reset_sgr();
     }
 
@@ -311,7 +425,7 @@ impl EventHandler for Sketch {
                 },
                 glyph => dialog.keyboard_input(terminal, glyph),
             },
-            SketchMode::Sketching => match glyph {
+            _ => match glyph {
                 // Open background colorpicker dialog on ^B.
                 '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),
                 // Open foreground colorpicker dialog on ^F.
@@ -335,8 +449,11 @@ impl EventHandler for Sketch {
     }
 
     fn mouse_input(&mut self, terminal: &mut Terminal, event: MouseEvent) {
-        // Ignore mouse release events.
-        if event.button_state == ButtonState::Released || self.mode != SketchMode::Sketching {
+        // Ignore mouse events while dialogs are open.
+        if let SketchMode::SaveDialog(_)
+        | SketchMode::BrushCharacterDialog(_)
+        | SketchMode::ColorpickerDialog(_) = self.mode
+        {
             self.brush.position = Point { column: event.column, line: event.line };
             return;
         }
@@ -348,21 +465,107 @@ impl EventHandler for Sketch {
 
         self.goto(event.column, event.line);
 
-        match event.button {
-            MouseButton::Left => self.write_cursor(CursorWriteMode::Write),
-            MouseButton::Right => self.write_cursor(CursorWriteMode::Erase),
-            MouseButton::Index(4) => {
+        match (event, &self.mode) {
+            // Start line drawing mode.
+            (
+                MouseEvent {
+                    button: MouseButton::Left,
+                    button_state: ButtonState::Pressed,
+                    modifiers: Modifiers::CONTROL,
+                    ..
+                },
+                SketchMode::Sketching,
+            ) => {
+                let point = Point { column: event.column, line: event.line };
+                self.mode = SketchMode::LineDrawing(point, false);
+            },
+            // Preview the line drawing box.
+            (
+                MouseEvent { button_state: ButtonState::Up, .. },
+                SketchMode::LineDrawing(start_point, false),
+            ) => {
+                let end_point = Point { column: event.column, line: event.line };
+                let start_point = *start_point;
+                self.preview_box(start_point, end_point);
+            },
+            // Draw the box once line drawing mode is finished.
+            (
+                MouseEvent {
+                    button: MouseButton::Left, button_state: ButtonState::Pressed, ..
+                },
+                SketchMode::LineDrawing(start_point, false),
+            ) => {
+                let end_point = Point { column: event.column, line: event.line };
+                let start_point = *start_point;
+                self.write_box(start_point, end_point, WriteMode::Write);
+                self.mode = SketchMode::Sketching;
+            },
+            // Preview the line drawing line.
+            (
+                MouseEvent { button: MouseButton::Left, button_state: ButtonState::Down, .. },
+                SketchMode::LineDrawing(start_point, _),
+            ) => {
+                // Preview the line.
+                let end_point = Point { column: event.column, line: event.line };
+                let start_point = *start_point;
+                self.preview_line(start_point, end_point);
+
+                // Prevent box drawing since the cursor has moved.
+                self.mode = SketchMode::LineDrawing(start_point, true);
+            },
+            // Stop line drawing once the mouse was released after moving.
+            (
+                MouseEvent {
+                    button: MouseButton::Left, button_state: ButtonState::Released, ..
+                },
+                SketchMode::LineDrawing(start_point, true),
+            ) => {
+                let end_point = Point { column: event.column, line: event.line };
+                let start_point = *start_point;
+                self.write_line(start_point, end_point, WriteMode::Write);
+                self.mode = SketchMode::Sketching;
+            },
+            // Write brush with left mouse button pressed.
+            (MouseEvent { button: MouseButton::Left, button_state, .. }, SketchMode::Sketching)
+                if button_state == ButtonState::Down || button_state == ButtonState::Pressed =>
+            {
+                self.write_brush(WriteMode::Write)
+            },
+            // Erase brush with right mouse button pressed.
+            (
+                MouseEvent { button: MouseButton::Right, button_state, .. },
+                SketchMode::Sketching,
+            ) if button_state == ButtonState::Down || button_state == ButtonState::Pressed => {
+                self.write_brush(WriteMode::Erase)
+            },
+            // Increase brush size.
+            (MouseEvent { button: MouseButton::Index(4), .. }, SketchMode::Sketching) => {
                 self.brush.size = self.brush.size.saturating_add(1);
                 self.brush.template = Brush::create_template(self.brush.size);
             },
-            MouseButton::Index(5) => {
+            // Decrease brush size.
+            (MouseEvent { button: MouseButton::Index(5), .. }, SketchMode::Sketching) => {
                 self.brush.size = max(1, self.brush.size - 1);
                 self.brush.template = Brush::create_template(self.brush.size);
             },
             _ => (),
         }
 
-        self.preview_brush();
+        // Preview cursor only while sketching.
+        if self.mode == SketchMode::Sketching {
+            // Draw brush at size 1 for line drawing preview.
+            if event.modifiers.contains(Modifiers::CONTROL) && event.button != MouseButton::Right {
+                let original_size = mem::replace(&mut self.brush.size, 1);
+                self.brush.template = Brush::create_template(self.brush.size);
+
+                self.preview_brush();
+
+                self.brush.size = original_size;
+                self.brush.template = Brush::create_template(self.brush.size);
+            } else {
+                self.preview_brush();
+            }
+        }
     }
 
     /// Resize the internal terminal state.
@@ -402,7 +605,7 @@ impl EventHandler for Sketch {
             SketchMode::BrushCharacterDialog(dialog) => dialog.render(terminal),
             SketchMode::ColorpickerDialog(dialog) => dialog.render(terminal),
             SketchMode::SaveDialog(dialog) => dialog.render(terminal),
-            SketchMode::Sketching => (),
+            _ => (),
         }
     }
 
@@ -615,6 +818,8 @@ enum SketchMode {
     ColorpickerDialog(ColorpickerDialog),
     /// Save dialog.
     SaveDialog(SaveDialog),
+
+    LineDrawing(Point, bool),
 }
 
 impl Default for SketchMode {
@@ -623,19 +828,19 @@ impl Default for SketchMode {
     }
 }
 
-/// Modes for writing text using the mouse cursor.
-#[derive(Debug)]
-enum CursorWriteMode {
-    /// Write the cursor without storing the result.
+/// Modes for writing text to the grid.
+#[derive(Debug, PartialEq, Eq)]
+enum WriteMode {
+    /// Write to the terminal without storing the result.
     WriteVolatile,
-    /// Write the cursor.
+    /// Write to the terminal and internal state.
     Write,
-    /// Write the cursor as whitespace.
+    /// Write whitespace to erase content from terminal and internal state.
     Erase,
 }
 
 /// Coordinate in the terminal grid.
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 struct Point {
     column: usize,
     line: usize,
