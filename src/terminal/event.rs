@@ -45,33 +45,59 @@ pub struct MouseEvent {
 impl MouseEvent {
     /// Create a new mouse event from CSI parameters.
     pub fn new(button: u16, column: u16, line: u16, action: char) -> Self {
-        let button_state = if button == 35 {
+        let sgr_event = SgrEvent::from_bits_truncate(button as u8);
+
+        let button_state = if sgr_event.contains(SgrEvent::NONE) {
             ButtonState::Up
-        } else if button & 0b10_0000 == 0b10_0000 {
+        } else if sgr_event.contains(SgrEvent::DOWN) {
             ButtonState::Down
-        } else if action == 'M' {
-            ButtonState::Pressed
-        } else {
+        } else if action == 'm' {
             ButtonState::Released
+        } else {
+            ButtonState::Pressed
         };
 
         let modifiers = Modifiers::from_bits_truncate(button as u8);
 
-        let button = match button & 0b11_0000_11 {
+        let button = match button as u8 & SgrEvent::BUTTONS.bits() {
             0 => MouseButton::Left,
             1 => MouseButton::Middle,
             2 => MouseButton::Right,
             3 => MouseButton::None,
-            index if index & 0b1_0000_00 == 0b1_0000_00 => {
-                MouseButton::Index(4 + (index as usize & 0b11))
+            index if sgr_event.contains(SgrEvent::EXTENDED1) => {
+                MouseButton::Index(4 + (index & SgrEvent::NONE.bits()))
             },
-            index if index & 0b10_0000_00 == 0b10_0000_00 => {
-                MouseButton::Index(8 + (index as usize & 0b11))
+            index if sgr_event.contains(SgrEvent::EXTENDED2) => {
+                MouseButton::Index(8 + (index & SgrEvent::NONE.bits()))
             },
             _ => unreachable!(),
         };
 
         MouseEvent { button_state, button, modifiers, column: column as usize, line: line as usize }
+    }
+}
+
+bitflags! {
+    /// Bitflag information of SGR mouse events.
+    pub struct SgrEvent: u8 {
+        // Mouse buttons.
+        const LEFT      = 0b00;
+        const MIDDLE    = 0b01;
+        const RIGHT     = 0b10;
+        const NONE      = 0b11;
+
+        // Modifiers.
+        const SHIFT     = 0b001_00;
+        const ALT       = 0b010_00;
+        const CONTROL   = 0b100_00;
+
+        // Button state.
+        const DOWN      = 0b1_000_00;
+
+        // Extended mouse buttons.
+        const EXTENDED1 = 0b01_0_000_00;
+        const EXTENDED2 = 0b10_0_000_00;
+        const BUTTONS   = 0b11_0_000_11;
     }
 }
 
@@ -103,7 +129,7 @@ pub enum MouseButton {
     ///
     /// Buttons 4 and 5 are used for the scrollwheel. Buttons 7-11 are used for mice with macro
     /// buttons.
-    Index(usize),
+    Index(u8),
 }
 
 bitflags! {
