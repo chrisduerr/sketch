@@ -42,6 +42,12 @@ struct Sketch {
 
     /// Mouse cursor brush used for drawing.
     brush: Brush,
+
+    /// Current change revision for undo/redo tracking.
+    revision: usize,
+
+    /// Highest revision available for redo.
+    max_revision: usize,
 }
 
 impl Sketch {
@@ -52,6 +58,8 @@ impl Sketch {
             content: Default::default(),
             mode: Default::default(),
             brush: Default::default(),
+            revision: Default::default(),
+            max_revision: Default::default(),
         }
     }
 
@@ -136,16 +144,17 @@ impl Sketch {
             let max = min(column + (count - 1) * width, line.len());
             for column in (column..=max).step_by(width) {
                 // Replace the glyph itself.
-                line[column - 1] = Cell::new(c, foreground, background);
+                let cell = Cell::new(c, foreground, background);
+                line[column - 1].replace(cell, self.revision);
 
                 // Reset the following character when writing fullwidth characters.
                 if width == 2 {
-                    line[column].clear();
+                    line[column].clear(self.revision);
                 }
 
                 // Replace previous fullwidth character if we're writing inside its spacer.
                 if column >= 2 && line[column - 2].c.width() == Some(2) {
-                    line[column - 2].clear();
+                    line[column - 2].clear(self.revision);
                 }
             }
         }
@@ -213,6 +222,11 @@ impl Sketch {
 
         // Restore cursor position.
         self.goto(cursor_position.column, cursor_position.line);
+
+        // Increment undo history.
+        if mode != WriteMode::WriteVolatile {
+            self.bump_revision();
+        }
     }
 
     // Preview the brush using dim colors.
@@ -279,6 +293,11 @@ impl Sketch {
 
         // Restore cursor position.
         self.goto(cursor_position.column, cursor_position.line);
+
+        // Increment undo history.
+        if mode != WriteMode::WriteVolatile {
+            self.bump_revision();
+        }
     }
 
     /// Preview the box using dim colors.
@@ -319,6 +338,11 @@ impl Sketch {
 
         // Restore cursor position.
         self.goto(cursor_position.column, cursor_position.line);
+
+        // Increment undo history.
+        if mode != WriteMode::WriteVolatile {
+            self.bump_revision();
+        }
     }
 
     /// Preview the line using dim colors.
@@ -351,6 +375,8 @@ impl Sketch {
         // Overwrite cell without moving cursor.
         self.write(' ', true);
         self.goto(column, line);
+
+        self.bump_revision();
     }
 
     /// Open the dialog for color selection.
@@ -390,6 +416,48 @@ impl Sketch {
         Terminal::set_color(Color::default(), Color::default());
         Terminal::goto(0, last_line + 1);
         Terminal::write(KEYBINDING_HELP);
+    }
+
+    /// Set the grid's revision to a certain point in history.
+    fn set_revision(&mut self, terminal: &mut Terminal, revision: usize) {
+        // Only allow increasing to revisions that actually exist.
+        if revision > self.max_revision {
+            return;
+        }
+
+        // Set grid state revision.
+        for line in &mut self.content {
+            for cell in line {
+                cell.set_revision(self.revision, revision);
+            }
+        }
+        self.revision = revision;
+
+        // Render changes.
+        self.redraw(terminal);
+    }
+
+    /// Increment the current revision.
+    fn bump_revision(&mut self) {
+        // Clear redo history.
+        self.clear_history(self.revision);
+
+        // Bump the curront revision.
+        self.revision += 1;
+        self.max_revision = self.revision;
+    }
+
+    /// Drop all revisions after `revision`.
+    fn clear_history(&mut self, revision: usize) {
+        // Remove redo history from all cells.
+        for line in &mut self.content {
+            for cell in line {
+                cell.clear_history(revision);
+            }
+        }
+
+        // Limit redo history to new revision.
+        self.max_revision = revision;
     }
 }
 
@@ -436,12 +504,17 @@ impl EventHandler for Sketch {
                 '\x7f' => self.backspace(),
                 // Clear the screen.
                 '\x0c' => self.clear(terminal),
+                // Undo last action.
+                '\x15' => self.set_revision(terminal, self.revision.saturating_sub(1)),
+                // Redo last undone action.
+                '\x12' => self.set_revision(terminal, self.revision + 1),
                 glyph if glyph.width().unwrap_or_default() > 0 => {
                     // Show IBeam cursor while typing.
                     terminal.set_mode(TerminalMode::ShowCursor, true);
                     Terminal::set_cursor_shape(CursorShape::IBeam);
 
                     self.write(glyph, true);
+                    self.bump_revision();
                 },
                 _ => (),
             },
@@ -642,7 +715,7 @@ impl Display for Sketch {
         for line in &self.content {
             let mut column = 0;
             while column < line.len() {
-                let cell = line[column];
+                let cell = &line[column];
 
                 // Restore the cell's colors
                 if cell.foreground != foreground {
@@ -708,21 +781,56 @@ impl Drop for Sketch {
 }
 
 /// Content of a cell in the grid.
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Cell {
+    // Cell contents.
     c: char,
     foreground: Color,
     background: Color,
+
+    /// Versioned cell change history.
+    history: Vec<(Cell, usize)>,
 }
 
 impl Cell {
     fn new(c: char, foreground: Color, background: Color) -> Self {
-        Self { c, foreground, background }
+        Self { history: Vec::new(), c, foreground, background }
     }
 
     /// Reset the cell to the default content.
-    fn clear(&mut self) {
-        *self = Self::default();
+    fn clear(&mut self, revision: usize) {
+        self.replace(Self::default(), revision);
+    }
+
+    /// Replace the cell with a new cell.
+    ///
+    /// This should be used over replacing the cell directly, since it correctly keeps track of the
+    /// cell's history for undoing changes in the future.
+    fn replace(&mut self, cell: Self, revision: usize) {
+        // Replace cell and store transaction in history.
+        let mut cell = mem::replace(self, cell);
+        mem::swap(&mut self.history, &mut cell.history);
+        self.history.push((cell, revision));
+    }
+
+    /// Set the active revision of the cell.
+    fn set_revision(&mut self, current_revision: usize, new_revision: usize) {
+        // Find a change matching the revision.
+        let index = match self.history.iter().rposition(|(_, rev)| *rev == new_revision) {
+            Some(index) => index,
+            None => return,
+        };
+
+        // Swap old revision with current cell.
+        let cell = self.history.swap_remove(index).0;
+        let mut cell = mem::replace(self, cell);
+        mem::swap(&mut self.history, &mut cell.history);
+        self.history.push((cell, current_revision));
+    }
+
+    /// Drop all revisions after `revision`.
+    fn clear_history(&mut self, revision: usize) {
+        self.history.retain(|(_, rev)| *rev <= revision);
     }
 }
 

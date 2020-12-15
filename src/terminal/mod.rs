@@ -369,7 +369,7 @@ impl DerefMut for TerminalModes {
 }
 
 /// Terminal color.
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Color {
     Named(NamedColor),
     Indexed(u8),
@@ -398,7 +398,7 @@ impl Color {
 }
 
 /// CTerm color.
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum NamedColor {
     // Black = 0,
     // Red = 1,
@@ -412,7 +412,7 @@ pub enum NamedColor {
 }
 
 /// RGB color.
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,
