@@ -16,13 +16,13 @@ use crate::cli::Options;
 use crate::dialog::brush_character::BrushCharacterDialog;
 use crate::dialog::colorpicker::{ColorPosition, ColorpickerDialog};
 use crate::dialog::save::SaveDialog;
+use crate::dialog::help::HelpDialog;
 use crate::dialog::Dialog;
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
 
-/// Help text for the last line.
-const KEYBINDING_HELP: &str = "[^T] Brush glyph  [^F] Foreground  [^B] Background  [CTRL] \
-                               Line/Box drawing  [Wheel] Brush size  [^L] Clear  [^C] Quit";
+/// Help dialog binding information.
+const HELP: &str = "[CTRL + ?] Help";
 
 fn main() -> io::Result<()> {
     // Launch the application.
@@ -404,18 +404,25 @@ impl Sketch {
         self.redraw(terminal);
     }
 
-    /// Render the keybinding help message.
+    /// Open the dialog for showing keybarding and usage information.
+    fn open_help_dialog(&mut self, terminal: &mut Terminal) {
+        let dialog = HelpDialog::new();
+        dialog.render(terminal);
+
+        self.mode = SketchMode::HelpDialog(dialog);
+    }
+
+    /// Render the help dialog message.
     fn render_help(&mut self) {
         // Skip drawing if the last line has any content in it.
-        let last_line = self.content.len() - 1;
-        if self.content[last_line].iter().any(|cell| *cell != Cell::default()) {
+        if self.content[0].iter().any(|cell| *cell != Cell::default()) {
             return;
         }
 
         // Write the help message into the last line.
-        Terminal::set_color(Color::default(), Color::default());
-        Terminal::goto(0, last_line + 1);
-        Terminal::write(KEYBINDING_HELP);
+        Terminal::reset_sgr();
+        Terminal::goto(0, 0);
+        Terminal::write(HELP);
     }
 
     /// Set the grid's revision to a certain point in history.
@@ -493,6 +500,10 @@ impl EventHandler for Sketch {
                 },
                 glyph => dialog.keyboard_input(terminal, glyph),
             },
+            SketchMode::HelpDialog(_) => match glyph {
+                '\n' => self.close_dialog(terminal),
+                _ => (),
+            },
             _ => match glyph {
                 // Open background colorpicker dialog on ^B.
                 '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),
@@ -500,6 +511,8 @@ impl EventHandler for Sketch {
                 '\x06' => self.open_color_dialog(terminal, ColorPosition::Foreground),
                 // Open brush character dialog on ^B.
                 '\x14' => self.open_brush_character_dialog(terminal),
+                // Open help dialog on ^?.
+                '\x1f' => self.open_help_dialog(terminal),
                 // Delete last character on backspace.
                 '\x7f' => self.backspace(),
                 // Clear the screen.
@@ -524,6 +537,7 @@ impl EventHandler for Sketch {
     fn mouse_input(&mut self, terminal: &mut Terminal, event: MouseEvent) {
         // Ignore mouse events while dialogs are open.
         if let SketchMode::SaveDialog(_)
+        | SketchMode::HelpDialog(_)
         | SketchMode::BrushCharacterDialog(_)
         | SketchMode::ColorpickerDialog(_) = self.mode
         {
@@ -678,6 +692,7 @@ impl EventHandler for Sketch {
             SketchMode::BrushCharacterDialog(dialog) => dialog.render(terminal),
             SketchMode::ColorpickerDialog(dialog) => dialog.render(terminal),
             SketchMode::SaveDialog(dialog) => dialog.render(terminal),
+            SketchMode::HelpDialog(dialog) => dialog.render(terminal),
             _ => (),
         }
     }
@@ -920,14 +935,16 @@ impl Brush {
 enum SketchMode {
     /// Default drawing mode.
     Sketching,
+    /// Line/Box drawing mode.
+    LineDrawing(Point, bool),
     /// Brush character dialog prompt.
     BrushCharacterDialog(BrushCharacterDialog),
     /// Colorpicker dialog.
     ColorpickerDialog(ColorpickerDialog),
     /// Save dialog.
     SaveDialog(SaveDialog),
-
-    LineDrawing(Point, bool),
+    /// Help dialog.
+    HelpDialog(HelpDialog),
 }
 
 impl Default for SketchMode {
