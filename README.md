@@ -4,12 +4,16 @@
     <img width="200" alt="Sketch Logo" src="sketch.png">
 </p>
 
-Sketch is the terminal painting program you've never asked for. With support for
-colors, text and a brush with adjustable sizes and glyphs, it has everything you
-do not need.
+Sketch is the terminal painting program you've never asked for.
 
-## Demo
+### Features
 
-![](sketch.gif)
+ - Line and box drawing
+ - Text input
+ - Adjustable brush sizes
+ - Customizable brush colors and character
 
-![](line_drawing.gif)
+## Demos
+
+<img src="sketch.gif" align="left" width="45%">
+<img src="line_drawing.gif" align="right" width="45%">
