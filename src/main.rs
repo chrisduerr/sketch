@@ -479,6 +479,13 @@ impl EventHandler for Sketch {
         self.redraw(terminal);
 
         match &mut self.mode {
+            // Allow closing dialogs with Escape.
+            SketchMode::BrushCharacterDialog(_)
+            | SketchMode::ColorpickerDialog(_)
+            | SketchMode::SaveDialog(_)
+            | SketchMode::HelpDialog(_) if glyph == '\x1b' => {
+                self.close_dialog(terminal);
+            },
             SketchMode::BrushCharacterDialog(dialog) => match glyph {
                 '\n' => {
                     self.brush.glyph = dialog.glyph();
@@ -509,6 +516,8 @@ impl EventHandler for Sketch {
                 '\n' => self.close_dialog(terminal),
                 _ => (),
             },
+            // Cancel box/line drawing on escape.
+            SketchMode::LineDrawing(_, _) if glyph == '\x1b' => self.mode = SketchMode::Sketching,
             _ => match glyph {
                 // Open background colorpicker dialog on ^B.
                 '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),

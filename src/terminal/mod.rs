@@ -9,7 +9,7 @@ use std::str::{self, FromStr};
 use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
-use vte::Parser;
+use vte::{Parser, Perform};
 
 use crate::terminal::event::EventHandler;
 
@@ -103,8 +103,15 @@ impl Terminal {
                     STDIN_TOKEN => {
                         // Pass STDIN to parser.
                         let read = stdin.read(&mut buf)?;
-                        for byte in &buf[..read] {
-                            parser.advance(self, *byte);
+
+                        if &buf[..read] == &[b'\x1b'] {
+                            // Treat a single ESC read as a key press.
+                            self.print('\x1b');
+                        } else {
+                            // Pass read bytes to VT parser.
+                            for byte in &buf[..read] {
+                                parser.advance(self, *byte);
+                            }
                         }
                     },
                     SIGNAL_TOKEN => {
