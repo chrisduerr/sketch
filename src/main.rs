@@ -711,7 +711,10 @@ impl EventHandler for Sketch {
 
     fn shutdown(&mut self, terminal: &mut Terminal) {
         match self.mode {
-            SketchMode::SaveDialog(_) => (),
+            SketchMode::BrushCharacterDialog(_)
+            | SketchMode::ColorpickerDialog(_)
+            | SketchMode::HelpDialog(_)
+            | SketchMode::SaveDialog(_) => self.close_dialog(terminal),
             _ if self.options.output.is_some() => terminal.shutdown(),
             _ => self.open_save_dialog(terminal),
         }
