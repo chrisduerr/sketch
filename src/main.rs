@@ -15,8 +15,8 @@ use unicode_width::UnicodeWidthChar;
 use crate::cli::Options;
 use crate::dialog::brush_character::BrushCharacterDialog;
 use crate::dialog::colorpicker::{ColorPosition, ColorpickerDialog};
-use crate::dialog::save::SaveDialog;
 use crate::dialog::help::HelpDialog;
+use crate::dialog::save::SaveDialog;
 use crate::dialog::Dialog;
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
@@ -88,9 +88,11 @@ impl Sketch {
     /// Clear the entire screen, going back to an empty canvas.
     fn clear(&mut self, terminal: &mut Terminal) {
         // Reset storage.
-        let lines = self.content.len();
-        let columns = self.content[0].len();
-        self.content = vec![vec![Cell::default(); columns]; lines];
+        for line in &mut self.content {
+            for cell in line {
+                cell.clear(self.revision);
+            }
+        }
 
         // Clear terminal.
         Terminal::clear();
@@ -98,6 +100,9 @@ impl Sketch {
         // Redraw cursor template and help message.
         self.redraw(terminal);
         self.preview_brush();
+
+        // Increment undo history.
+        self.bump_revision();
     }
 
     /// Move terminal cursor.
@@ -796,7 +801,7 @@ impl Drop for Sketch {
 }
 
 /// Content of a cell in the grid.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Eq)]
 struct Cell {
     // Cell contents.
     c: char,
@@ -805,6 +810,15 @@ struct Cell {
 
     /// Versioned cell change history.
     history: Vec<(Cell, usize)>,
+}
+
+// Custom `PartialEq` implementation ignoring the cell's history.
+impl PartialEq for Cell {
+    fn eq(&self, other: &Self) -> bool {
+        self.c == other.c
+            && self.foreground == other.foreground
+            && self.background == other.background
+    }
 }
 
 impl Cell {
