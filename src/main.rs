@@ -496,7 +496,7 @@ impl EventHandler for Sketch {
             SketchMode::ColorpickerDialog(dialog) => match glyph {
                 // Reset to default color on ^E.
                 '\x05' => {
-                    self.brush.set_color(dialog.color_position(), dialog.color());
+                    self.brush.set_color(dialog.color_position(), Color::default());
                     self.close_dialog(terminal);
                 },
                 '\n' => {
