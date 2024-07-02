@@ -2,12 +2,12 @@
 name = "sketch"
 version = "0.1.0"
 authors = ["Christian Duerr <contact@christianduerr.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-vte = { git = "https://github.com/alacritty/vte", default-features = false }
-mio = { version = "0.7.6", features = ["os-ext"] }
-unicode-width = "0.1.8"
-structopt = "0.3.21"
-bitflags = "1.2.1"
+bitflags = "2.6.0"
 libc = "0.2.77"
+mio = { version = "1.0.0", features = ["os-ext"] }
+structopt = "0.3.21"
+unicode-width = "0.1.8"
+vte = "0.13.0"

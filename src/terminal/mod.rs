@@ -24,8 +24,8 @@ const SIGNAL_TOKEN: Token = Token(1);
 
 /// Terminal emulation state.
 ///
-/// This is used to make sure the terminal can reset itself properly after the application is
-/// closed.
+/// This is used to make sure the terminal can reset itself properly after the
+/// application is closed.
 pub struct Terminal {
     /// Terminal dimensions in columns/lines.
     pub dimensions: Dimensions,
@@ -55,16 +55,17 @@ impl Terminal {
 
     /// Set the handler for terminal events.
     ///
-    /// It is necessary to call this before [`run`] is called to make sure that events like mouse
-    /// and keyboard input can be reacted upon.
+    /// It is necessary to call this before [`run`] is called to make sure that
+    /// events like mouse and keyboard input can be reacted upon.
     pub fn set_event_handler(&mut self, event_handler: Box<dyn EventHandler>) {
         self.event_handler = event_handler;
     }
 
     /// Run the terminal event loop.
     ///
-    /// This will block until the application is terminated. The `EventHandler` registered to this
-    /// terminal will be called whenever a new event is received.
+    /// This will block until the application is terminated. The `EventHandler`
+    /// registered to this terminal will be called whenever a new event is
+    /// received.
     pub fn run(&mut self) -> io::Result<()> {
         // Setup terminal escape sequence parser.
         let mut parser = Parser::new();
@@ -88,7 +89,7 @@ impl Terminal {
         signal::register(SIGHUP)?;
 
         // Reserve buffer for reading from STDIN.
-        let mut buf = [0; u16::max_value() as usize];
+        let mut buf = [0; u16::MAX as usize];
 
         while !self.terminated {
             // Stop if we run into a polling error we cannot handle ourselves.
@@ -104,7 +105,7 @@ impl Terminal {
                         // Pass STDIN to parser.
                         let read = stdin.read(&mut buf)?;
 
-                        if &buf[..read] == &[b'\x1b'] {
+                        if buf[..read] == [b'\x1b'] {
                             // Treat a single ESC read as a key press.
                             self.print('\x1b');
                         } else {
@@ -138,8 +139,8 @@ impl Terminal {
     ///
     /// # Errors
     ///
-    /// This function will raise an [`io::ErrorKind::Interrupted`] error if the signal requested an
-    /// application shutdown.
+    /// This function will raise an [`io::ErrorKind::Interrupted`] error if the
+    /// signal requested an application shutdown.
     fn handle_signal(&mut self, signal: libc::c_int) -> io::Result<()> {
         match signal {
             // Try to tear everything down nicely when the controlling terminal died.

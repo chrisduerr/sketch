@@ -72,7 +72,7 @@ impl Dialog for ColorpickerDialog {
     }
 
     fn cursor_position(&self, lines: &[String]) -> Option<(usize, usize)> {
-        let mut line_len = lines.get(0).map(|line| line.width()).unwrap_or_default();
+        let mut line_len = lines.first().map(|line| line.width()).unwrap_or_default();
 
         // Move below 0 when the first digit hasn't been picked yet.
         if let ColorpickerMode::CTerm(0) = self.mode {

@@ -113,16 +113,17 @@ impl Sketch {
 
     /// Write character at the current cursor position.
     ///
-    /// The `persist` flag determines if the write operation will be committed to Sketch's
-    /// application state. This is used to clear things from the grid which are not part of the
-    /// sketch (like the cursor preview).
+    /// The `persist` flag determines if the write operation will be committed
+    /// to Sketch's application state. This is used to clear things from the
+    /// grid which are not part of the sketch (like the cursor preview).
     fn write(&mut self, c: char, persist: bool) {
         self.write_many(c, 1, persist);
     }
 
     /// Write the same character multiple times.
     ///
-    /// This is a version of [`write`] optimized to repeat the same character many times.
+    /// This is a version of [`write`] optimized to repeat the same character
+    /// many times.
     fn write_many(&mut self, c: char, count: usize, persist: bool) {
         if count == 0 {
             return;
@@ -483,7 +484,9 @@ impl EventHandler for Sketch {
             SketchMode::BrushCharacterDialog(_)
             | SketchMode::ColorpickerDialog(_)
             | SketchMode::SaveDialog(_)
-            | SketchMode::HelpDialog(_) if glyph == '\x1b' => {
+            | SketchMode::HelpDialog(_)
+                if glyph == '\x1b' =>
+            {
                 self.close_dialog(terminal);
             },
             SketchMode::BrushCharacterDialog(dialog) => match glyph {
@@ -512,12 +515,9 @@ impl EventHandler for Sketch {
                 },
                 glyph => dialog.keyboard_input(terminal, glyph),
             },
-            SketchMode::HelpDialog(_) => match glyph {
-                '\n' => self.close_dialog(terminal),
-                _ => (),
-            },
+            SketchMode::HelpDialog(_) if glyph == '\n' => self.close_dialog(terminal),
             // Cancel box/line drawing on escape.
-            SketchMode::LineDrawing(_, _) if glyph == '\x1b' => self.mode = SketchMode::Sketching,
+            SketchMode::LineDrawing(..) if glyph == '\x1b' => self.mode = SketchMode::Sketching,
             _ => match glyph {
                 // Open background colorpicker dialog on ^B.
                 '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),
@@ -671,8 +671,8 @@ impl EventHandler for Sketch {
 
     /// Resize the internal terminal state.
     ///
-    /// This will discard all content that was written outside the terminal dimensions with no way
-    /// to recover it.
+    /// This will discard all content that was written outside the terminal
+    /// dimensions with no way to recover it.
     fn resize(&mut self, terminal: &mut Terminal, dimensions: Dimensions) {
         let Dimensions { columns, lines } = dimensions;
         let (columns, lines) = (columns as usize, lines as usize);
@@ -845,8 +845,8 @@ impl Cell {
 
     /// Replace the cell with a new cell.
     ///
-    /// This should be used over replacing the cell directly, since it correctly keeps track of the
-    /// cell's history for undoing changes in the future.
+    /// This should be used over replacing the cell directly, since it correctly
+    /// keeps track of the cell's history for undoing changes in the future.
     fn replace(&mut self, cell: Self, revision: usize) {
         // Replace cell and store transaction in history.
         let mut cell = mem::replace(self, cell);
@@ -909,8 +909,9 @@ impl Brush {
 
     /// Create a new brush template.
     ///
-    /// The brush will always be hexagon shaped, the resulting template is a matrix that stores
-    /// `true` for every cell that contains a brush glyph and `false` for all empty cells.
+    /// The brush will always be hexagon shaped, the resulting template is a
+    /// matrix that stores `true` for every cell that contains a brush glyph
+    /// and `false` for all empty cells.
     ///
     /// A brush with size 6 might look like this (`+`: `true`, `-`: `false`):
     ///
@@ -957,9 +958,10 @@ impl Brush {
 }
 
 /// Current application state.
-#[derive(PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq)]
 enum SketchMode {
     /// Default drawing mode.
+    #[default]
     Sketching,
     /// Line/Box drawing mode.
     LineDrawing(Point, bool),
@@ -971,12 +973,6 @@ enum SketchMode {
     SaveDialog(SaveDialog),
     /// Help dialog.
     HelpDialog(HelpDialog),
-}
-
-impl Default for SketchMode {
-    fn default() -> Self {
-        SketchMode::Sketching
-    }
 }
 
 /// Modes for writing text to the grid.

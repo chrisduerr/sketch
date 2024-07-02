@@ -7,7 +7,7 @@ pub struct HelpDialog;
 impl HelpDialog {
     /// Create a new help dialog.
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 }
 

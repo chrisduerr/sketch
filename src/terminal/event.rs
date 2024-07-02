@@ -14,8 +14,9 @@ pub trait EventHandler {
 
     /// Redraw request.
     ///
-    /// Since some actions can clear the terminal, like recovering from a suspension, this event is
-    /// emitted whenever the application state should be rendered again.
+    /// Since some actions can clear the terminal, like recovering from a
+    /// suspension, this event is emitted whenever the application state
+    /// should be rendered again.
     fn redraw(&mut self, _terminal: &mut Terminal) {}
 
     /// Terminal focus has changed.
@@ -23,7 +24,8 @@ pub trait EventHandler {
 
     /// Shutdown request.
     ///
-    /// By default this will terminate the terminal event loop by calling [`Terminal::shutdown`].
+    /// By default this will terminate the terminal event loop by calling
+    /// [`Terminal::shutdown`].
     fn shutdown(&mut self, terminal: &mut Terminal) {
         terminal.shutdown();
     }
@@ -81,23 +83,23 @@ bitflags! {
     /// Bitflag information of SGR mouse events.
     pub struct SgrEvent: u8 {
         // Mouse buttons.
-        const LEFT      = 0b00;
-        const MIDDLE    = 0b01;
-        const RIGHT     = 0b10;
-        const NONE      = 0b11;
+        const LEFT      = 0b0000_0000;
+        const MIDDLE    = 0b0000_0001;
+        const RIGHT     = 0b0000_0010;
+        const NONE      = 0b0000_0011;
 
         // Modifiers.
-        const SHIFT     = 0b001_00;
-        const ALT       = 0b010_00;
-        const CONTROL   = 0b100_00;
+        const SHIFT     = 0b0000_0100;
+        const ALT       = 0b0000_1000;
+        const CONTROL   = 0b0001_0000;
 
         // Button state.
-        const DOWN      = 0b1_000_00;
+        const DOWN      = 0b0010_0000;
 
         // Extended mouse buttons.
-        const EXTENDED1 = 0b01_0_000_00;
-        const EXTENDED2 = 0b10_0_000_00;
-        const BUTTONS   = 0b11_0_000_11;
+        const EXTENDED1 = 0b0100_0000;
+        const EXTENDED2 = 0b1000_0000;
+        const BUTTONS   = 0b1100_0011;
     }
 }
 
@@ -122,21 +124,22 @@ pub enum MouseButton {
     Right,
     /// No mouse button pressed.
     ///
-    /// This is emitted in an event when the mouse cursor has moved without any active button
-    /// presses.
+    /// This is emitted in an event when the mouse cursor has moved without any
+    /// active button presses.
     None,
     /// Mouse buttons beyond Left/Middle/Right.
     ///
-    /// Buttons 4 and 5 are used for the scrollwheel. Buttons 7-11 are used for mice with macro
-    /// buttons.
+    /// Buttons 4 and 5 are used for the scrollwheel. Buttons 7-11 are used for
+    /// mice with macro buttons.
     Index(u8),
 }
 
 bitflags! {
     /// Mouse event keyboard modifiers.
+    #[derive(Copy, Clone, PartialEq, Eq, Debug)]
     pub struct Modifiers: u8 {
-        const SHIFT   = 0b001_00;
-        const ALT     = 0b010_00;
-        const CONTROL = 0b100_00;
+        const SHIFT   = 0b0000_0100;
+        const ALT     = 0b0000_1000;
+        const CONTROL = 0b0001_0000;
     }
 }

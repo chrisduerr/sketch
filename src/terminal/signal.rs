@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use std::mem;
+use std::ptr::addr_of_mut;
 
 use mio::unix::pipe::{self, Receiver, Sender};
 
@@ -43,8 +43,7 @@ pub fn unregister(signal: libc::c_int) -> io::Result<()> {
 
 /// POSIX signal handler for [`libc::signal`].
 unsafe extern "C" fn handler(signal: libc::c_int) {
-    if let Some(signals) = &mut SIGNALS {
-        let bytes = mem::transmute::<libc::c_int, [u8; 4]>(signal);
-        let _ = signals.write_all(&bytes);
+    if let Some(Some(signals)) = addr_of_mut!(SIGNALS).as_mut() {
+        let _ = signals.write_all(&signal.to_ne_bytes());
     }
 }

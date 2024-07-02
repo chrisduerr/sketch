@@ -15,8 +15,8 @@ pub struct BrushCharacterDialog {
 impl BrushCharacterDialog {
     /// Create a new brush character dialog.
     ///
-    /// The brush character `glyph` will be rendered at the end of the prompt to indicate to the
-    /// user what the active glyph for the brush is.
+    /// The brush character `glyph` will be rendered at the end of the prompt to
+    /// indicate to the user what the active glyph for the brush is.
     pub fn new(glyph: char) -> Self {
         Self { glyph }
     }
@@ -47,6 +47,6 @@ impl Dialog for BrushCharacterDialog {
     }
 
     fn cursor_position(&self, lines: &[String]) -> Option<(usize, usize)> {
-        Some((lines.get(0).map(|line| line.width()).unwrap_or_default() - 1, 0))
+        Some((lines.first().map(|line| line.width()).unwrap_or_default() - 1, 0))
     }
 }
