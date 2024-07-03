@@ -3,6 +3,7 @@ mod dialog;
 mod terminal;
 
 use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::fs::File;
@@ -43,6 +44,9 @@ struct Sketch {
     /// Mouse cursor brush used for drawing.
     brush: Brush,
 
+    /// Text cursor position.
+    text_cursor: Option<Point>,
+
     /// Current change revision for undo/redo tracking.
     revision: usize,
 
@@ -55,11 +59,12 @@ impl Sketch {
     fn new() -> Self {
         Self {
             options: Options::from_args(),
-            content: Default::default(),
-            mode: Default::default(),
-            brush: Default::default(),
-            revision: Default::default(),
             max_revision: Default::default(),
+            text_cursor: Default::default(),
+            revision: Default::default(),
+            content: Default::default(),
+            brush: Default::default(),
+            mode: Default::default(),
         }
     }
 
@@ -105,41 +110,35 @@ impl Sketch {
         self.bump_revision();
     }
 
-    /// Move terminal cursor.
-    fn goto(&mut self, column: usize, line: usize) {
-        self.brush.position = Point { column, line };
-        Terminal::goto(column, line);
-    }
-
-    /// Write character at the current cursor position.
+    /// Write character at the specified position.
     ///
     /// The `persist` flag determines if the write operation will be committed
     /// to Sketch's application state. This is used to clear things from the
     /// grid which are not part of the sketch (like the cursor preview).
-    fn write(&mut self, c: char, persist: bool) {
-        self.write_many(c, 1, persist);
+    fn write(&mut self, at: Point, c: char, persist: bool) -> Point {
+        self.write_many(at, c, 1, persist)
     }
 
     /// Write the same character multiple times.
     ///
     /// This is a version of [`write`] optimized to repeat the same character
     /// many times.
-    fn write_many(&mut self, c: char, count: usize, persist: bool) {
+    fn write_many(&mut self, at: Point, c: char, count: usize, persist: bool) -> Point {
         if count == 0 {
-            return;
+            return at;
         }
 
         // Verify that the glyph is a printable character.
         let width = match c.width() {
             Some(width) if width > 0 => width,
-            _ => return,
+            _ => return at,
         };
 
-        let Point { column, line } = self.brush.position;
+        let Point { column, line } = at;
 
         // Verify the first cell write is within the grid.
         if self.content.len() < line || self.content[line - 1].len() + 1 < column + width {
-            return;
+            return at;
         }
 
         // Store character in the grid state.
@@ -169,13 +168,15 @@ impl Sketch {
         Terminal::set_color(foreground, background);
 
         // Write to the terminal.
-        self.brush.position.column += width * count;
+        Terminal::goto(column, line);
         Terminal::write(c);
 
         // Use the terminal escape to repeat the character.
         if count > 1 {
             Terminal::repeat(count - 1);
         }
+
+        Point { column: column + width * count, line }
     }
 
     /// Write the brush's content at its current location.
@@ -203,9 +204,11 @@ impl Sketch {
                 _ => continue,
             };
 
-            // Move the cursor to the target for the first occupied cell.
-            let first_column = (origin_column + first_occupied as isize) as usize;
-            self.goto(first_column, target_line as usize);
+            // Get write target start location.
+            let write_location = Point {
+                column: (origin_column + first_occupied as isize) as usize,
+                line: target_line as usize,
+            };
 
             // Get the last non-empty cell in the brush.
             let last_occupied = self.brush.template[line].iter().rposition(|occ| *occ).unwrap_or(0);
@@ -215,19 +218,20 @@ impl Sketch {
             let columns = (last_occupied + width - first_occupied) / width;
 
             match mode {
-                WriteMode::WriteVolatile => self.write_many(self.brush.glyph, columns, false),
-                WriteMode::Write => self.write_many(self.brush.glyph, columns, true),
+                WriteMode::WriteVolatile => {
+                    self.write_many(write_location, self.brush.glyph, columns, false);
+                },
+                WriteMode::Write => {
+                    self.write_many(write_location, self.brush.glyph, columns, true);
+                },
                 WriteMode::Erase => {
                     // Overwrite characters with default background set.
                     let background = mem::take(&mut self.brush.background);
-                    self.write_many(' ', columns * width, true);
+                    self.write_many(write_location, ' ', columns * width, true);
                     self.brush.background = background;
                 },
             }
         }
-
-        // Restore cursor position.
-        self.goto(cursor_position.column, cursor_position.line);
 
         // Increment undo history.
         if mode != WriteMode::WriteVolatile {
@@ -250,8 +254,6 @@ impl Sketch {
         }
         let persistent = mode == WriteMode::Write;
 
-        let cursor_position = self.brush.position;
-
         // Ensure start is always at the top left corner of the box.
         if start.column > end.column {
             mem::swap(&mut start.column, &mut end.column);
@@ -261,44 +263,45 @@ impl Sketch {
         }
 
         // Write box drawing characters for first and last line.
-        self.goto(start.column, start.line);
         if start.column == end.column && start.line == end.line {
             // Single cell box.
-            self.write('┼', persistent);
+            self.write(start, '┼', persistent);
         } else if start.column == end.column {
             // Vertical line.
-            self.write('┬', persistent);
-            self.goto(start.column, end.line);
-            self.write('┴', persistent);
+            self.write(start, '┬', persistent);
+            let point = Point { column: start.column, line: end.line };
+            self.write(point, '┴', persistent);
         } else if start.line == end.line {
             // Horizontal line.
-            self.write('├', persistent);
+            let mut point = self.write(start, '├', persistent);
             if end.column - start.column > 1 {
-                self.write_many('─', end.column - start.column - 1, persistent);
+                point = self.write_many(point, '─', end.column - start.column - 1, persistent);
             }
-            self.write('┤', persistent);
+            self.write(point, '┤', persistent);
         } else {
             // Full box.
-            self.write('┌', persistent);
-            self.write_many('─', end.column - start.column - 1, persistent);
-            self.write('┐', persistent);
+            let mut point = self.write(start, '┌', persistent);
+            point = self.write_many(point, '─', end.column - start.column - 1, persistent);
+            self.write(point, '┐', persistent);
 
-            self.goto(start.column, end.line);
-            self.write('└', persistent);
-            self.write_many('─', end.column - start.column - 1, persistent);
-            self.write('┘', persistent);
+            let mut point = Point { column: start.column, line: end.line };
+            point = self.write(point, '└', persistent);
+            point = self.write_many(point, '─', end.column - start.column - 1, persistent);
+            self.write(point, '┘', persistent);
         };
 
         // Draw the sides of the box.
         for line in (start.line..end.line).skip(1) {
-            self.goto(start.column, line);
-            self.write('│', persistent);
-            self.goto(end.column, line);
-            self.write('│', persistent);
-        }
+            // Write left border.
+            let point = Point { column: start.column, line };
+            self.write(point, '│', persistent);
 
-        // Restore cursor position.
-        self.goto(cursor_position.column, cursor_position.line);
+            // Write right border.
+            if end.column != start.column {
+                let point = Point { column: end.column, line };
+                self.write(point, '│', persistent);
+            }
+        }
 
         // Increment undo history.
         if mode != WriteMode::WriteVolatile {
@@ -321,8 +324,6 @@ impl Sketch {
         }
         let persistent = mode == WriteMode::Write;
 
-        let cursor_position = self.brush.position;
-
         // Check the brush travel in X and Y direction.
         let min_column = min(start.column, end.column);
         let column_delta = max(start.column, end.column) - min_column;
@@ -332,18 +333,15 @@ impl Sketch {
 
         // Write the line.
         if column_delta >= line_delta * 2 {
-            self.goto(min_column, start.line);
             let count = (column_delta + 1) / self.brush.glyph.width().unwrap_or(1);
-            self.write_many(self.brush.glyph, count, persistent);
+            let point = Point { column: min_column, line: start.line };
+            self.write_many(point, self.brush.glyph, count, persistent);
         } else {
             for line in min_line..=max_line {
-                self.goto(start.column, line);
-                self.write(self.brush.glyph, persistent);
+                let point = Point { column: start.column, line };
+                self.write(point, self.brush.glyph, persistent);
             }
         }
-
-        // Restore cursor position.
-        self.goto(cursor_position.column, cursor_position.line);
 
         // Increment undo history.
         if mode != WriteMode::WriteVolatile {
@@ -372,15 +370,26 @@ impl Sketch {
     }
 
     /// Emulate backspace to delete the last character.
-    fn backspace(&mut self) {
-        // Move cursor to the previous cell.
-        let Point { column, line } = self.brush.position;
-        let column = max(column.saturating_sub(1), 1);
-        self.goto(column, line);
+    fn backspace(&mut self, terminal: &mut Terminal) {
+        // Ignore backspace in the first column.
+        let text_cursor = self.text_cursor.get_or_insert(self.brush.position);
+        if text_cursor.column <= 1 {
+            return;
+        }
 
-        // Overwrite cell without moving cursor.
-        self.write(' ', true);
-        self.goto(column, line);
+        // Move cursor to the previous cell.
+        text_cursor.column -= 1;
+
+        // Overwrite cell with whitespace.
+        let point = *text_cursor;
+        self.write(point, ' ', true);
+
+        // Move terminal cursor to new location.
+        Terminal::goto(point.column, point.line);
+
+        // Ensure IBeam cursor is visible.
+        terminal.set_mode(TerminalMode::ShowCursor, true);
+        Terminal::set_cursor_shape(CursorShape::IBeam);
 
         self.bump_revision();
     }
@@ -420,8 +429,8 @@ impl Sketch {
 
     /// Render the help dialog message.
     fn render_help(&mut self) {
-        // Skip drawing if the last line has any content in it.
-        if self.content[0].iter().any(|cell| *cell != Cell::default()) {
+        // Skip drawing if the first line has any content in it.
+        if !self.content[0].iter().all(Cell::is_empty) {
             return;
         }
 
@@ -528,19 +537,35 @@ impl EventHandler for Sketch {
                 // Open help dialog on ^?.
                 '\x1f' => self.open_help_dialog(terminal),
                 // Delete last character on backspace.
-                '\x7f' => self.backspace(),
+                '\x7f' => self.backspace(terminal),
                 // Clear the screen.
                 '\x0c' => self.clear(terminal),
                 // Undo last action.
                 '\x15' => self.set_revision(terminal, self.revision.saturating_sub(1)),
                 // Redo last undone action.
                 '\x12' => self.set_revision(terminal, self.revision + 1),
+                // Go to the next line.
+                '\n' => {
+                    // Ignore enter without previous text input.
+                    let text_cursor = match &mut self.text_cursor {
+                        Some(text_cursor) => text_cursor,
+                        None => return,
+                    };
+
+                    // Move text cursor to next line.
+                    text_cursor.column = self.brush.position.column;
+                    text_cursor.line += 1;
+                    Terminal::goto(text_cursor.column, text_cursor.line);
+                },
+                // Write the character to the screen.
                 glyph if glyph.width().unwrap_or_default() > 0 => {
                     // Show IBeam cursor while typing.
                     terminal.set_mode(TerminalMode::ShowCursor, true);
                     Terminal::set_cursor_shape(CursorShape::IBeam);
 
-                    self.write(glyph, true);
+                    // Write character at text cursor location.
+                    let text_cursor = *self.text_cursor.get_or_insert(self.brush.position);
+                    self.text_cursor = Some(self.write(text_cursor, glyph, true));
                     self.bump_revision();
                 },
                 _ => (),
@@ -549,13 +574,16 @@ impl EventHandler for Sketch {
     }
 
     fn mouse_input(&mut self, terminal: &mut Terminal, event: MouseEvent) {
+        // Always keep track of cursor on position change.
+        self.brush.position = Point { column: event.column, line: event.line };
+        self.text_cursor = None;
+
         // Ignore mouse events while dialogs are open.
         if let SketchMode::SaveDialog(_)
         | SketchMode::HelpDialog(_)
         | SketchMode::BrushCharacterDialog(_)
         | SketchMode::ColorpickerDialog(_) = self.mode
         {
-            self.brush.position = Point { column: event.column, line: event.line };
             return;
         }
 
@@ -563,8 +591,6 @@ impl EventHandler for Sketch {
         terminal.set_mode(TerminalMode::ShowCursor, false);
 
         self.redraw(terminal);
-
-        self.goto(event.column, event.line);
 
         match (event, &self.mode) {
             // Start line drawing mode.
@@ -690,16 +716,16 @@ impl EventHandler for Sketch {
     }
 
     fn redraw(&mut self, terminal: &mut Terminal) {
-        let Point { column, line } = self.brush.position;
-
         // Re-print the entire stored buffer.
         Terminal::goto(1, 1);
         Terminal::write(self.to_string());
 
         self.render_help();
 
-        // Restore cursor position.
-        Terminal::goto(column, line);
+        // Restore text cursor.
+        if let Some(text_cursor) = self.text_cursor {
+            Terminal::goto(text_cursor.column, text_cursor.line);
+        }
 
         // Redraw dialogs.
         match &mut self.mode {
@@ -813,7 +839,7 @@ impl Drop for Sketch {
 }
 
 /// Content of a cell in the grid.
-#[derive(Debug, Clone, Default, Eq)]
+#[derive(Debug, Clone, Default)]
 struct Cell {
     // Cell contents.
     c: char,
@@ -821,21 +847,12 @@ struct Cell {
     background: Color,
 
     /// Versioned cell change history.
-    history: Vec<(Cell, usize)>,
-}
-
-// Custom `PartialEq` implementation ignoring the cell's history.
-impl PartialEq for Cell {
-    fn eq(&self, other: &Self) -> bool {
-        self.c == other.c
-            && self.foreground == other.foreground
-            && self.background == other.background
-    }
+    history: HashMap<usize, Cell>,
 }
 
 impl Cell {
     fn new(c: char, foreground: Color, background: Color) -> Self {
-        Self { history: Vec::new(), c, foreground, background }
+        Self { history: HashMap::new(), c, foreground, background }
     }
 
     /// Reset the cell to the default content.
@@ -847,31 +864,37 @@ impl Cell {
     ///
     /// This should be used over replacing the cell directly, since it correctly
     /// keeps track of the cell's history for undoing changes in the future.
-    fn replace(&mut self, cell: Self, revision: usize) {
-        // Replace cell and store transaction in history.
-        let mut cell = mem::replace(self, cell);
-        mem::swap(&mut self.history, &mut cell.history);
-        self.history.push((cell, revision));
+    fn replace(&mut self, mut cell: Self, revision: usize) {
+        // Replace the current cell.
+        cell.history = mem::take(&mut self.history);
+        let old_cell = mem::replace(self, cell);
+
+        // Update history if this was the first update for the revision.
+        self.history.entry(revision).or_insert(old_cell);
     }
 
     /// Set the active revision of the cell.
     fn set_revision(&mut self, current_revision: usize, new_revision: usize) {
         // Find a change matching the revision.
-        let index = match self.history.iter().rposition(|(_, rev)| *rev == new_revision) {
-            Some(index) => index,
+        let mut cell = match self.history.remove(&new_revision) {
+            Some(cell) => cell,
             None => return,
         };
 
         // Swap old revision with current cell.
-        let cell = self.history.swap_remove(index).0;
-        let mut cell = mem::replace(self, cell);
-        mem::swap(&mut self.history, &mut cell.history);
-        self.history.push((cell, current_revision));
+        cell.history = mem::take(&mut self.history);
+        let old_cell = mem::replace(self, cell);
+        self.history.insert(current_revision, old_cell);
     }
 
     /// Drop all revisions after `revision`.
     fn clear_history(&mut self, revision: usize) {
-        self.history.retain(|(_, rev)| *rev <= revision);
+        self.history.retain(|rev, _| *rev <= revision);
+    }
+
+    /// Check if cell has any visible content.
+    fn is_empty(&self) -> bool {
+        (self.c.is_whitespace() || self.c == '\0') && self.background == Color::default()
     }
 }
 
