@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -53,12 +53,22 @@ impl SaveDialog {
 
     /// The selected save path.
     pub fn path(&self) -> Option<PathBuf> {
+        // Ignore paths that are empty or only whitespace.
         let path = self.path.trim();
         if path.is_empty() {
-            None
-        } else {
-            Some(PathBuf::from(path))
+            return None;
         }
+
+        // Handle home directory prefix.
+        if let Some(stripped) = path.strip_prefix("~/") {
+            // Ignore replacement without home dir, which conveniently causes an error.
+            if let Some(mut path) = home::home_dir() {
+                path.extend(Path::new(stripped));
+                return Some(path);
+            }
+        }
+
+        Some(PathBuf::from(path))
     }
 
     /// Indicate an error to the user.
