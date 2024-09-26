@@ -348,6 +348,7 @@ pub enum TerminalMode {
     MouseMotion = 1003,
     FocusInOut = 1004,
     AltScreen = 1049,
+    BracketedPaste = 2004,
 }
 
 /// Track active terminal modes.
@@ -363,6 +364,7 @@ impl Default for TerminalModes {
         modes.insert(TerminalMode::MouseMotion, false);
         modes.insert(TerminalMode::FocusInOut, false);
         modes.insert(TerminalMode::AltScreen, false);
+        modes.insert(TerminalMode::BracketedPaste, false);
 
         Self(modes)
     }

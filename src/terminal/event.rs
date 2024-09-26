@@ -22,6 +22,9 @@ pub trait EventHandler {
     /// Terminal focus has changed.
     fn focus_changed(&mut self, _terminal: &mut Terminal, _focus: bool) {}
 
+    /// Set whether a bracketed paste is being performed.
+    fn set_bracketed_paste_state(&mut self, _active: bool) {}
+
     /// Shutdown request.
     ///
     /// By default this will terminate the terminal event loop by calling

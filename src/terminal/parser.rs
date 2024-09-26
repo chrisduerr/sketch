@@ -32,6 +32,15 @@ impl Perform for Terminal {
             ('O', _) => {
                 self.handle_event(|handler, terminal| handler.focus_changed(terminal, false));
             },
+            ('~', _) => match params.into_iter().next() {
+                Some([200]) => {
+                    self.handle_event(|handler, _| handler.set_bracketed_paste_state(true))
+                },
+                Some([201]) => {
+                    self.handle_event(|handler, _| handler.set_bracketed_paste_state(false))
+                },
+                _ => (),
+            },
             _ => (),
         }
     }

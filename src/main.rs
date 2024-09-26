@@ -55,6 +55,9 @@ struct Sketch {
 
     /// Whether the Sketch was successfully saved to a file.
     persisted: bool,
+
+    /// Whether there's currently text being pasted.
+    pasting: bool,
 }
 
 impl Sketch {
@@ -67,6 +70,7 @@ impl Sketch {
             persisted: Default::default(),
             revision: Default::default(),
             content: Default::default(),
+            pasting: Default::default(),
             brush: Default::default(),
             mode: Default::default(),
         }
@@ -83,6 +87,7 @@ impl Sketch {
         terminal.set_mode(TerminalMode::SgrMouse, true);
         terminal.set_mode(TerminalMode::MouseMotion, true);
         terminal.set_mode(TerminalMode::FocusInOut, true);
+        terminal.set_mode(TerminalMode::BracketedPaste, true);
         Terminal::goto(0, 0);
 
         // Resize internal buffer to fit terminal dimensions.
@@ -472,10 +477,15 @@ impl Sketch {
 
     /// Increment the current revision.
     fn bump_revision(&mut self) {
+        // Ignore revision changes during bracketed paste.
+        if self.pasting {
+            return;
+        }
+
         // Clear redo history.
         self.clear_history(self.revision);
 
-        // Bump the curront revision.
+        // Bump the current revision.
         self.revision += 1;
         self.max_revision = self.revision;
     }
@@ -808,6 +818,15 @@ impl EventHandler for Sketch {
                 Err(_) => self.open_save_dialog(terminal, true),
             },
             None => self.open_save_dialog(terminal, false),
+        }
+    }
+
+    fn set_bracketed_paste_state(&mut self, active: bool) {
+        self.pasting = active;
+
+        // Create a revision once bracketed paste is done.
+        if !self.pasting {
+            self.bump_revision();
         }
     }
 }
