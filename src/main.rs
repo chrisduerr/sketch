@@ -560,7 +560,12 @@ impl EventHandler for Sketch {
                         Err(_) => dialog.mark_failed(terminal),
                     }
                 },
-                glyph => dialog.keyboard_input(terminal, glyph),
+                glyph => {
+                    let redraw_required = dialog.keyboard_input(terminal, glyph);
+                    if redraw_required {
+                        self.redraw(terminal);
+                    }
+                },
             },
             SketchMode::HelpDialog(_) if glyph == '\n' => self.close_dialog(terminal),
             // Cancel box/line drawing on escape.
@@ -755,6 +760,7 @@ impl EventHandler for Sketch {
         self.redraw(terminal);
     }
 
+    /// Redraw the entire UI.
     fn redraw(&mut self, terminal: &mut Terminal) {
         // Re-print the entire stored buffer.
         Terminal::goto(1, 1);

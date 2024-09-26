@@ -22,10 +22,12 @@ impl SaveDialog {
     }
 
     /// Process a keystroke.
-    pub fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) {
+    ///
+    /// Returns `true` if the dialog shrunk and a full redraw is required.
+    pub fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) -> bool {
         // Only accept renderable glyphs.
         if glyph != '\x7f' && glyph.width().unwrap_or_default() == 0 {
-            return;
+            return false;
         }
 
         // Clear error when the path is changed.
@@ -35,12 +37,18 @@ impl SaveDialog {
         match glyph {
             '\x7f' => {
                 let _ = self.path.pop();
+
+                // Redraw everything if backspace caused dialog to shrink.
+                if self.path.width() + 1 > SAVE_DIALOG_PROMPT.len() {
+                    return true;
+                }
             },
             c => self.path.push(c),
         }
 
-        // Update the dialog.
+        // Redraw just the dialog.
         self.render(terminal);
+        false
     }
 
     /// The selected save path.
