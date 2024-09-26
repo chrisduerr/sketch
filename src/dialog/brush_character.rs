@@ -23,8 +23,8 @@ impl BrushCharacterDialog {
 
     /// Process a keystroke.
     pub fn keyboard_input(&mut self, terminal: &mut Terminal, glyph: char) {
-        // Only accept renderable non-whitespace glyphs.
-        if glyph.width().unwrap_or_default() == 0 || glyph.is_whitespace() {
+        // Only accept renderable glyphs.
+        if glyph.width().unwrap_or_default() == 0 {
             return;
         }
 
