@@ -274,44 +274,55 @@ impl Sketch {
             mem::swap(&mut start.line, &mut end.line);
         }
 
+        // Write a new box char, taking combinations into consideration.
+        let mut write_line_char = |point, c| {
+            let old_c = self.content.get(point).c;
+            let new_c = self.combine_line_chars(old_c, c);
+            self.write(point, new_c, persistent)
+        };
+
         // Write box drawing characters for first and last line.
         if start.column == end.column && start.line == end.line {
             // Single cell box.
-            self.write(start, '┼', persistent);
+            write_line_char(start, '┼');
         } else if start.column == end.column {
             // Vertical line.
-            self.write(start, '┬', persistent);
+            write_line_char(start, '┬');
             let point = Point { column: start.column, line: end.line };
-            self.write(point, '┴', persistent);
+            write_line_char(point, '┴');
         } else if start.line == end.line {
             // Horizontal line.
-            let mut point = self.write(start, '├', persistent);
-            if end.column - start.column > 1 {
-                point = self.write_many(point, '─', end.column - start.column - 1, persistent);
+            let mut point = write_line_char(start, '├');
+            for _ in 0..end.column - start.column - 1 {
+                point = write_line_char(point, '─');
             }
-            self.write(point, '┤', persistent);
+            write_line_char(point, '┤');
         } else {
             // Full box.
-            let mut point = self.write(start, '┌', persistent);
-            point = self.write_many(point, '─', end.column - start.column - 1, persistent);
-            self.write(point, '┐', persistent);
+            let mut point = write_line_char(start, '┌');
+            for _ in 0..end.column - start.column - 1 {
+                point = write_line_char(point, '─');
+            }
+            write_line_char(point, '┐');
 
             let mut point = Point { column: start.column, line: end.line };
-            point = self.write(point, '└', persistent);
-            point = self.write_many(point, '─', end.column - start.column - 1, persistent);
-            self.write(point, '┘', persistent);
+            point = write_line_char(point, '└');
+            for _ in 0..end.column - start.column - 1 {
+                point = write_line_char(point, '─');
+            }
+            write_line_char(point, '┘');
         };
 
         // Draw the sides of the box.
         for line in (start.line..end.line).skip(1) {
             // Write left border.
             let point = Point { column: start.column, line };
-            self.write(point, '│', persistent);
+            write_line_char(point, '│');
 
             // Write right border.
             if end.column != start.column {
                 let point = Point { column: end.column, line };
-                self.write(point, '│', persistent);
+                write_line_char(point, '│');
             }
         }
 
@@ -513,6 +524,52 @@ impl Sketch {
         Terminal::reset_sgr();
         Terminal::goto(0, usize::MAX);
         Terminal::write(format!("Changed text style to \x1b[32m{}", self.brush.style.name()));
+    }
+
+    /// Calculate the combination of two line drawing characters.
+    ///
+    /// If either character is not a line drawing character, the new
+    /// character will be returned.
+    #[rustfmt::skip]
+    fn combine_line_chars(&self, existing: char, new: char) -> char {
+        // For reference:
+        // '─', '│', '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼'
+
+        match (existing, new) {
+            ('│', '┌' | '└')
+                | ('┌', '└' | '│')
+                | ('└', '┌' | '│')
+                | ('├', '│' | '┌' | '└') => '├',
+
+            ('│', '┐' | '┘')
+                |('┐', '┘' | '│')
+                | ('┘', '┐' | '│')
+                | ('┤', '│' | '┐' | '┘') => '┤',
+
+            ('─', '┌' | '┐')
+                |('┌', '┐' | '─')
+                | ('┐', '┌' | '─')
+                | ('┬', '─' | '┌' | '┐') => '┬',
+
+            ('─', '└' | '┘')
+                |('└', '┘' | '─')
+                | ('┘', '└' | '─')
+                | ('┴', '─' | '└' | '┘') => '┴',
+
+            ('─', '│' | '├' | '┤')
+                | ('│', '─' | '┬' | '┴')
+                | ('┌', '┘' | '┤' | '┴')
+                | ('┐', '└' | '├' | '┴')
+                | ('└', '┐' | '┤' | '┬')
+                | ('┘', '┌' | '├' | '┬')
+                | ('├', '─' | '┐' | '┘' | '┤' | '┬' | '┴')
+                | ('┤', '─' | '┌' | '└' | '├' | '┬' | '┴')
+                | ('┬', '│' | '└' | '┘' | '├' | '┤' | '┴')
+                | ('┴', '│' | '┌' | '┐' | '├' | '┤' | '┬')
+                | ('┼', _) => '┼',
+
+            _ => new,
+        }
     }
 }
 
@@ -869,6 +926,11 @@ impl Grid {
     fn persist(&self, path: &Path) -> io::Result<()> {
         let text = self.trimmed_text();
         fs::write(path, text)
+    }
+
+    /// Get cell at the specified point.
+    fn get(&self, point: Point) -> &Cell {
+        &self.0[point.line - 1][point.column - 1]
     }
 }
 
