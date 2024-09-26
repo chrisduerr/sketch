@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::dialog::Dialog;
-use crate::terminal::Terminal;
+use crate::terminal::{Color, NamedColor, Terminal};
 
 /// Message prompt of the save dialog.
 const SAVE_DIALOG_PROMPT: &str = "Output path (leave empty for stdout):";
@@ -12,12 +12,13 @@ const SAVE_DIALOG_PROMPT: &str = "Output path (leave empty for stdout):";
 #[derive(Default, PartialEq, Eq)]
 pub struct SaveDialog {
     path: String,
+    error: bool,
 }
 
 impl SaveDialog {
     /// Create a new save dialog.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(path: String, error: bool) -> Self {
+        Self { path, error }
     }
 
     /// Process a keystroke.
@@ -26,6 +27,9 @@ impl SaveDialog {
         if glyph != '\x7f' && glyph.width().unwrap_or_default() == 0 {
             return;
         }
+
+        // Clear error when the path is changed.
+        self.error = false;
 
         // Add the new glyph to the path.
         match glyph {
@@ -48,6 +52,13 @@ impl SaveDialog {
             Some(PathBuf::from(path))
         }
     }
+
+    /// Indicate an error to the user.
+    pub fn mark_failed(&mut self, terminal: &mut Terminal) {
+        // Mark failure and update the dialog.
+        self.error = true;
+        self.render(terminal);
+    }
 }
 
 impl Dialog for SaveDialog {
@@ -57,5 +68,10 @@ impl Dialog for SaveDialog {
 
     fn cursor_position(&self, lines: &[String]) -> Option<(usize, usize)> {
         Some((lines.get(1).map(|line| line.width()).unwrap_or_default(), 1))
+    }
+
+    fn box_color(&self) -> (Color, Color) {
+        let fg = if self.error { Color::Named(NamedColor::Red) } else { Color::default() };
+        (fg, Color::default())
     }
 }

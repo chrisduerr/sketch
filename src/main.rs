@@ -6,9 +6,9 @@ use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
-use std::fs::File;
-use std::io::{self, Write};
-use std::mem;
+use std::ops::{Deref, DerefMut};
+use std::path::Path;
+use std::{fs, io, mem};
 
 use structopt::StructOpt;
 use unicode_width::UnicodeWidthChar;
@@ -33,7 +33,7 @@ fn main() -> io::Result<()> {
 /// Sketch application state.
 struct Sketch {
     /// Content of the terminal grid.
-    content: Vec<Vec<Cell>>,
+    content: Grid,
 
     /// CLI config.
     options: Options,
@@ -52,6 +52,9 @@ struct Sketch {
 
     /// Highest revision available for redo.
     max_revision: usize,
+
+    /// Whether the Sketch was successfully saved to a file.
+    persisted: bool,
 }
 
 impl Sketch {
@@ -61,6 +64,7 @@ impl Sketch {
             options: Options::from_args(),
             max_revision: Default::default(),
             text_cursor: Default::default(),
+            persisted: Default::default(),
             revision: Default::default(),
             content: Default::default(),
             brush: Default::default(),
@@ -93,7 +97,7 @@ impl Sketch {
     /// Clear the entire screen, going back to an empty canvas.
     fn clear(&mut self, terminal: &mut Terminal) {
         // Reset storage.
-        for line in &mut self.content {
+        for line in self.content.iter_mut() {
             for cell in line {
                 cell.clear(self.revision);
             }
@@ -415,8 +419,12 @@ impl Sketch {
     }
 
     /// Open the dialog for picking the save path.
-    fn open_save_dialog(&mut self, terminal: &mut Terminal) {
-        self.mode = SketchMode::SaveDialog(SaveDialog::new());
+    fn open_save_dialog(&mut self, terminal: &mut Terminal, error: bool) {
+        let path = match &self.options.output {
+            Some(path) => path.to_string_lossy().into(),
+            None => String::new(),
+        };
+        self.mode = SketchMode::SaveDialog(SaveDialog::new(path, error));
 
         // Redraw the entire terminal to clear previous dialogs.
         self.redraw(terminal);
@@ -451,7 +459,7 @@ impl Sketch {
         }
 
         // Set grid state revision.
-        for line in &mut self.content {
+        for line in self.content.iter_mut() {
             for cell in line {
                 cell.set_revision(self.revision, revision);
             }
@@ -475,7 +483,7 @@ impl Sketch {
     /// Drop all revisions after `revision`.
     fn clear_history(&mut self, revision: usize) {
         // Remove redo history from all cells.
-        for line in &mut self.content {
+        for line in self.content.iter_mut() {
             for cell in line {
                 cell.clear_history(revision);
             }
@@ -534,8 +542,23 @@ impl EventHandler for Sketch {
             },
             SketchMode::SaveDialog(dialog) => match glyph {
                 '\n' => {
-                    self.options.output = dialog.path();
-                    terminal.shutdown();
+                    // Check if a path was submitted.
+                    let path = match dialog.path() {
+                        Some(path) => path,
+                        None => {
+                            terminal.shutdown();
+                            return;
+                        },
+                    };
+
+                    // Attempt to persist the path.
+                    match self.content.persist(&path) {
+                        Ok(()) => {
+                            self.persisted = true;
+                            terminal.shutdown();
+                        },
+                        Err(_) => dialog.mark_failed(terminal),
+                    }
                 },
                 glyph => dialog.keyboard_input(terminal, glyph),
             },
@@ -724,7 +747,7 @@ impl EventHandler for Sketch {
         self.content.resize(lines, vec![Cell::default(); columns]);
 
         // Resize columns of each line.
-        for line in &mut self.content {
+        for line in self.content.iter_mut() {
             line.resize(columns, Cell::default());
         }
 
@@ -735,7 +758,7 @@ impl EventHandler for Sketch {
     fn redraw(&mut self, terminal: &mut Terminal) {
         // Re-print the entire stored buffer.
         Terminal::goto(1, 1);
-        Terminal::write(self.to_string());
+        Terminal::write(self.content.to_string());
 
         self.render_help();
 
@@ -762,21 +785,72 @@ impl EventHandler for Sketch {
     }
 
     fn shutdown(&mut self, terminal: &mut Terminal) {
+        // If another dialog is open, close it.
         match self.mode {
             SketchMode::BrushCharacterDialog(_)
             | SketchMode::ColorpickerDialog(_)
-            | SketchMode::HelpDialog(_)
-            | SketchMode::SaveDialog(_) => self.close_dialog(terminal),
-            _ if self.options.output.is_some() => terminal.shutdown(),
-            _ => self.open_save_dialog(terminal),
+            | SketchMode::HelpDialog(_) => self.close_dialog(terminal),
+            _ => (),
+        }
+
+        match &self.options.output {
+            Some(path) => match self.content.persist(path) {
+                Ok(()) => {
+                    self.persisted = true;
+                    terminal.shutdown();
+                },
+                Err(_) => self.open_save_dialog(terminal, true),
+            },
+            None => self.open_save_dialog(terminal, false),
         }
     }
 }
 
-impl Display for Sketch {
+impl Drop for Sketch {
+    fn drop(&mut self) {
+        // Write Sketch to STDOUT if it wasn't saved to a file.
+        if !self.persisted {
+            print!("{}", self.content.trimmed_text());
+        }
+    }
+}
+
+/// Sketch content grid.
+#[derive(Default)]
+struct Grid(Vec<Vec<Cell>>);
+
+impl Grid {
+    /// Get a trimmed version of the sketch.
+    ///
+    /// This will remove all empty lines from the top and bottom of the sketch.
+    fn trimmed_text(&self) -> String {
+        let mut text = self.to_string();
+
+        // Find the first non-empty line.
+        let start_offset = text
+            .chars()
+            .enumerate()
+            .take_while(|&(_, c)| c.is_whitespace())
+            .fold(0, |acc, (i, c)| if c == '\n' { i + 1 } else { acc });
+
+        // Remove empty lines above or below the sketch.
+        text = text[start_offset..].trim_end().to_owned();
+        text.push('\n');
+
+        text
+    }
+
+    /// Try to write the Sketch to a file.
+    fn persist(&self, path: &Path) -> io::Result<()> {
+        let text = self.trimmed_text();
+        fs::write(path, text)
+    }
+}
+
+impl Display for Grid {
     /// Render the entire grid to the formatter.
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if self.content.is_empty() {
+        if self.0.is_empty() {
             return Ok(());
         }
 
@@ -789,7 +863,7 @@ impl Display for Sketch {
         let mut style = TextStyle::empty();
         Terminal::set_style(style);
 
-        for line in &self.content {
+        for line in &self.0 {
             let mut column = 0;
             while column < line.len() {
                 let cell = &line[column];
@@ -827,39 +901,17 @@ impl Display for Sketch {
     }
 }
 
-impl Drop for Sketch {
-    /// Print the sketch to primary screen after quitting.
-    fn drop(&mut self) {
-        let mut text = self.to_string();
+impl Deref for Grid {
+    type Target = Vec<Vec<Cell>>;
 
-        // Find the first non-empty line.
-        let start_offset = text
-            .chars()
-            .enumerate()
-            .take_while(|&(_, c)| c.is_whitespace())
-            .fold(0, |acc, (i, c)| if c == '\n' { i + 1 } else { acc });
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
-        // Remove empty lines above or below the sketch.
-        text = text[start_offset..].trim_end().to_owned();
-        text.push('\n');
-
-        // Don't bother with empty sketches.
-        if text.is_empty() {
-            return;
-        }
-
-        // Attempt to write result to file.
-        let write_result = self
-            .options
-            .output
-            .as_ref()
-            .and_then(|output| File::create(output).ok())
-            .and_then(|mut file| file.write_all(text.as_bytes()).ok());
-
-        // Write to stdout if file isn't available.
-        if write_result.is_none() {
-            print!("{}", text);
-        }
+impl DerefMut for Grid {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

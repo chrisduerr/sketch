@@ -163,7 +163,7 @@ impl From<Color> for ColorpickerMode {
     fn from(color: Color) -> Self {
         match color {
             Color::Named(NamedColor::Default) => Self::default(),
-            // Color::Named(color) => Self::CTerm(color as u8),
+            Color::Named(color) => Self::CTerm(color as u8),
             Color::Indexed(index) => Self::CTerm(index),
             Color::Rgb(Rgb { r, g, b }) => Self::Rgb(format!("{:02x}{:02x}{:02x}", r, g, b)),
         }
