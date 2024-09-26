@@ -9,11 +9,11 @@ Sketch is the terminal painting program you've never asked for.
 ### Features
 
  - Line and box drawing
- - Text input
- - Adjustable brush sizes
- - Customizable brush colors and character
+ - Text input and copy/paste
+ - Adjustable brush sizes and characters
+ - Customizable text styles with truecolor support
+ - Linear history for undo/redo
 
-## Demos
+## Demo
 
-<img src="sketch.gif" align="left" width="45%">
-<img src="line_drawing.gif" align="right" width="45%">
+https://github.com/user-attachments/assets/221461ec-f7fb-4410-b2f6-0e1d5268d33a
