@@ -17,6 +17,7 @@ impl Dialog for HelpDialog {
             String::from("MOUSE WHEEL        Change brush size"),
             String::from("CTRL + LMB         Start box drawing"),
             String::from("CTRL + DRAG LMB    Assisted line drawing"),
+            String::from("CTRL + S           Toggle through text styles"),
             String::from("CTRL + T           Open brush character dialog"),
             String::from("CTRL + F           Open foreground color dialog"),
             String::from("CTRL + B           Open background color dialog"),

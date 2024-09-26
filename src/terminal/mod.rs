@@ -6,6 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::ptr;
 use std::str::{self, FromStr};
 
+use bitflags::bitflags;
 use libc::{self, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGTSTP, SIGWINCH};
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
@@ -211,6 +212,11 @@ impl Terminal {
     /// Decrease intensity for the following characters.
     pub fn set_dim() {
         Self::write("\x1b[2m");
+    }
+
+    /// Set the text style.
+    pub fn set_style(style: TextStyle) {
+        Self::write(style.escape())
     }
 
     /// Reset all text attributes (color/dim/bold/...) to the default.
@@ -470,5 +476,48 @@ fn change_terminal_attributes(change_attributes: impl FnOnce(&mut libc::termios)
         let mut termios = termios.assume_init();
         change_attributes(&mut termios);
         libc::tcsetattr(stdout_fd, 0, &termios);
+    }
+}
+
+bitflags! {
+    /// Text character style.
+    #[derive(PartialEq, Eq, Copy, Clone, Debug)]
+    pub struct TextStyle: u8 {
+        const BOLD    = 1 << 0;
+        const ITALICS = 1 << 1;
+    }
+}
+
+impl TextStyle {
+    /// Get the escape sequence to enable this style.
+    pub fn escape(&self) -> &'static str {
+        if self.contains(Self::BOLD | Self::ITALICS) {
+            "\x1b[1;3m"
+        } else if self.contains(Self::BOLD) {
+            "\x1b[1;23m"
+        } else if self.contains(Self::ITALICS) {
+            "\x1b[21;3m"
+        } else {
+            "\x1b[21;23m"
+        }
+    }
+
+    /// Get human-readable name of the current mode.
+    pub fn name(&self) -> &'static str {
+        if self.contains(Self::BOLD | Self::ITALICS) {
+            "bold italic"
+        } else if self.contains(Self::BOLD) {
+            "bold"
+        } else if self.contains(Self::ITALICS) {
+            "italic"
+        } else {
+            "default"
+        }
+    }
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        TextStyle::empty()
     }
 }

@@ -20,7 +20,7 @@ use crate::dialog::help::HelpDialog;
 use crate::dialog::save::SaveDialog;
 use crate::dialog::Dialog;
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
-use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode};
+use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode, TextStyle};
 
 /// Help dialog binding information.
 const HELP: &str = "[CTRL + ?] Help";
@@ -149,7 +149,7 @@ impl Sketch {
             let max = min(column + (count - 1) * width, line.len());
             for column in (column..=max).step_by(width) {
                 // Replace the glyph itself.
-                let cell = Cell::new(c, foreground, background);
+                let cell = Cell::new(c, foreground, background, self.brush.style);
                 line[column - 1].replace(cell, self.revision);
 
                 // Reset the following character when writing fullwidth characters.
@@ -163,6 +163,9 @@ impl Sketch {
                 }
             }
         }
+
+        // Set the text style.
+        Terminal::set_style(self.brush.style);
 
         // Set the correct colors for the terminal write.
         Terminal::set_color(foreground, background);
@@ -481,6 +484,18 @@ impl Sketch {
         // Limit redo history to new revision.
         self.max_revision = revision;
     }
+
+    /// Toggle through text styles.
+    fn toggle_text_style(&mut self) {
+        // Switch to the next style.
+        let new_bits = (self.brush.style.bits() + 1) % (TextStyle::all().bits() + 1);
+        self.brush.style = TextStyle::from_bits(new_bits).unwrap();
+
+        // Print a helpful little message.
+        Terminal::reset_sgr();
+        Terminal::goto(0, usize::MAX);
+        Terminal::write(format!("Changed text style to \x1b[32m{}", self.brush.style.name()));
+    }
 }
 
 impl EventHandler for Sketch {
@@ -532,7 +547,9 @@ impl EventHandler for Sketch {
                 '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),
                 // Open foreground colorpicker dialog on ^F.
                 '\x06' => self.open_color_dialog(terminal, ColorPosition::Foreground),
-                // Open brush character dialog on ^B.
+                // Toggle through text styles on ^S.
+                '\x13' => self.toggle_text_style(),
+                // Open brush character dialog on ^T.
                 '\x14' => self.open_brush_character_dialog(terminal),
                 // Open help dialog on ^?.
                 '\x1f' => self.open_help_dialog(terminal),
@@ -765,17 +782,19 @@ impl Display for Sketch {
 
         let mut text = String::new();
 
-        // Store colors to reduce the number of writes when nothing changes.
+        // Store colors/styles to reduce number of writes.
         let mut foreground = Color::default();
         let mut background = Color::default();
         Terminal::set_color(foreground, background);
+        let mut style = TextStyle::empty();
+        Terminal::set_style(style);
 
         for line in &self.content {
             let mut column = 0;
             while column < line.len() {
                 let cell = &line[column];
 
-                // Restore the cell's colors
+                // Set the cell's colors
                 if cell.foreground != foreground {
                     text.push_str(&cell.foreground.escape(true));
                     foreground = cell.foreground;
@@ -783,6 +802,12 @@ impl Display for Sketch {
                 if cell.background != background {
                     text.push_str(&cell.background.escape(false));
                     background = cell.background;
+                }
+
+                // Set the cell's text style.
+                if cell.style != style {
+                    text.push_str(cell.style.escape());
+                    style = cell.style;
                 }
 
                 // Render empty cells as whitespace.
@@ -845,14 +870,15 @@ struct Cell {
     c: char,
     foreground: Color,
     background: Color,
+    style: TextStyle,
 
     /// Versioned cell change history.
     history: HashMap<usize, Cell>,
 }
 
 impl Cell {
-    fn new(c: char, foreground: Color, background: Color) -> Self {
-        Self { history: HashMap::new(), c, foreground, background }
+    fn new(c: char, foreground: Color, background: Color, style: TextStyle) -> Self {
+        Self { c, style, foreground, background, history: HashMap::new() }
     }
 
     /// Reset the cell to the default content.
@@ -903,6 +929,7 @@ struct Brush {
     template: Vec<Vec<bool>>,
     foreground: Color,
     background: Color,
+    style: TextStyle,
     position: Point,
     glyph: char,
     size: u8,
@@ -911,12 +938,13 @@ struct Brush {
 impl Default for Brush {
     fn default() -> Self {
         Self {
-            foreground: Color::default(),
-            background: Color::default(),
             template: Self::create_template(1),
-            position: Default::default(),
             glyph: '+',
             size: 1,
+            foreground: Default::default(),
+            background: Default::default(),
+            position: Default::default(),
+            style: Default::default(),
         }
     }
 }
