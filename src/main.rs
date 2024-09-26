@@ -3,7 +3,7 @@ mod dialog;
 mod terminal;
 
 use std::cmp::{max, min};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Deref, DerefMut};
@@ -58,6 +58,9 @@ struct Sketch {
 
     /// Whether there's currently text being pasted.
     pasting: bool,
+
+    /// Queue used for color fills.
+    fill_queue: VecDeque<(usize, usize, usize, isize)>,
 }
 
 impl Sketch {
@@ -67,6 +70,7 @@ impl Sketch {
             options: Options::parse(),
             max_revision: Default::default(),
             text_cursor: Default::default(),
+            fill_queue: Default::default(),
             persisted: Default::default(),
             revision: Default::default(),
             content: Default::default(),
@@ -526,6 +530,78 @@ impl Sketch {
         Terminal::write(format!("Changed text style to \x1b[32m{}", self.brush.style.name()));
     }
 
+    /// Flood-fill from cursor position.
+    fn fill(&mut self) {
+        // Use cell under the brush as template for filling.
+        let template = self.content.get(self.brush.position);
+        let template =
+            Cell::new(template.c, template.foreground, template.background, template.style);
+
+        // Setup the initial fill queue ranges.
+        let Point { mut column, line } = self.brush.position;
+        self.fill_queue.clear();
+        self.fill_queue.push_back((column, column, line, 1));
+        self.fill_queue.push_back((column, column, line - 1, -1));
+
+        while let Some((mut start_column, end_column, line, line_delta)) =
+            self.fill_queue.pop_front()
+        {
+            // Fill all empty cells to the left of this range's start.
+            column = start_column;
+            if self.content.cell_matches(column, line, &template) {
+                // Fill empty cells until we've reached a boundary on the left.
+                while self.content.cell_matches(column - 1, line, &template) {
+                    self.write(Point { line, column: column - 1 }, self.brush.glyph, true);
+                    column -= 1;
+                }
+
+                // Add new queue element to search in the opposite vertical direction if our
+                // horizontal range expanded to the left.
+                if column < start_column {
+                    let next_line = (line as isize - line_delta) as usize;
+                    self.fill_queue.push_back((column, start_column - 1, next_line, -line_delta));
+                }
+            }
+
+            // Fill all empty cells to the right of this range's start.
+            while start_column <= end_column {
+                // Fill empty cells until we've reached a boundary on the right.
+                while self.content.cell_matches(start_column, line, &template) {
+                    self.write(Point { line, column: start_column }, self.brush.glyph, true);
+                    start_column += 1;
+                }
+
+                // If the range isn't empty, search it again on the next line.
+                if start_column > column {
+                    let next_line = (line as isize + line_delta) as usize;
+                    self.fill_queue.push_back((column, start_column - 1, next_line, line_delta));
+                }
+
+                // Add new queue element to search in the opposite vertical direction if our
+                // horizontal range expanded to the right.
+                if start_column - 1 > end_column {
+                    let next_line = (line as isize - line_delta) as usize;
+                    let start = end_column + 1;
+                    let end = start_column - 1;
+                    self.fill_queue.push_back((start, end, next_line, -line_delta));
+                }
+
+                // Skip over occupied cells if we're not yet at the right boundary of the range.
+                start_column += 1;
+                while start_column < end_column
+                    && !self.content.cell_matches(start_column, line, &template)
+                {
+                    start_column += 1;
+                }
+
+                // Update right boundary of the last added range.
+                column = start_column;
+            }
+        }
+
+        self.bump_revision();
+    }
+
     /// Calculate the combination of two line drawing characters.
     ///
     /// If either character is not a line drawing character, the new
@@ -642,6 +718,8 @@ impl EventHandler for Sketch {
                 '\x02' => self.open_color_dialog(terminal, ColorPosition::Background),
                 // Open foreground colorpicker dialog on ^F.
                 '\x06' => self.open_color_dialog(terminal, ColorPosition::Foreground),
+                // Perform flood fill at cursor location.
+                '\x05' => self.fill(),
                 // Toggle through text styles on ^S.
                 '\x13' => self.toggle_text_style(),
                 // Open brush character dialog on ^T.
@@ -932,6 +1010,17 @@ impl Grid {
     fn get(&self, point: Point) -> &Cell {
         &self.0[point.line - 1][point.column - 1]
     }
+
+    /// Check if the content in a grid cell matches a template.
+    fn cell_matches(&self, column: usize, line: usize, template: &Cell) -> bool {
+        let try_index = |column, line| {
+            let column = usize::try_from(column as isize - 1).ok()?;
+            let line = usize::try_from(line as isize - 1).ok()?;
+            let grid_line = (line < self.len()).then(|| &self[line])?;
+            (column < grid_line.len()).then(|| &grid_line[column])
+        };
+        try_index(column, line).map_or(false, |cell| cell.content_eq(template))
+    }
 }
 
 impl Display for Grid {
@@ -1061,6 +1150,16 @@ impl Cell {
     fn is_empty(&self) -> bool {
         (self.c.is_whitespace() || self.c == '\0') && self.background == Color::default()
     }
+
+    /// Check if this cell's content matches another's.
+    fn content_eq(&self, other: &Cell) -> bool {
+        let both_whitespace = (self.c.is_whitespace() || self.c == '\0')
+            && (other.c.is_whitespace() || other.c == '\0');
+        let c_matches = self.c == other.c || both_whitespace;
+        c_matches
+            && self.background == other.background
+            && (self.foreground == other.foreground || both_whitespace)
+    }
 }
 
 /// Drawing brush.
@@ -1089,7 +1188,7 @@ impl Default for Brush {
 }
 
 impl Brush {
-    /// Update the brushe's colors.
+    /// Update the brush's colors.
     fn set_color(&mut self, position: ColorPosition, color: Color) {
         match position {
             ColorPosition::Foreground => self.foreground = color,

@@ -12,8 +12,9 @@ Sketch is the terminal painting program you've never asked for.
  - Text input and copy/paste
  - Adjustable brush sizes and characters
  - Customizable text styles with truecolor support
+ - "Paint Bucket" area filling
  - Linear history for undo/redo
 
 ## Demo
 
-https://github.com/user-attachments/assets/221461ec-f7fb-4410-b2f6-0e1d5268d33a
+https://github.com/user-attachments/assets/2fde2d86-810e-4044-9621-552c277e5588
