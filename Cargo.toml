@@ -6,8 +6,8 @@ edition = "2021"
 
 [dependencies]
 bitflags = "2.6.0"
+clap = { version = "4.5.18", features = ["derive"] }
 libc = "0.2.77"
 mio = { version = "1.0.0", features = ["os-ext"] }
-structopt = "0.3.21"
-unicode-width = "0.1.8"
+unicode-width = "0.2.0"
 vte = "0.13.0"

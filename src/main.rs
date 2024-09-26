@@ -10,7 +10,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::{fs, io, mem};
 
-use structopt::StructOpt;
+use clap::Parser;
 use unicode_width::UnicodeWidthChar;
 
 use crate::cli::Options;
@@ -64,7 +64,7 @@ impl Sketch {
     /// Setup the Sketch application state.
     fn new() -> Self {
         Self {
-            options: Options::from_args(),
+            options: Options::parse(),
             max_revision: Default::default(),
             text_cursor: Default::default(),
             persisted: Default::default(),

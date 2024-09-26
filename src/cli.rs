@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use structopt::StructOpt;
+use clap::Parser;
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
+#[command(author, about, version)]
 pub struct Options {
-    /// Output file.
-    #[structopt(short, long)]
+    /// output file
+    #[clap(short, long)]
     pub output: Option<PathBuf>,
 }
