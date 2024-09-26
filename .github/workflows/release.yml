@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MUSL Rust target
+        run: rustup update && rustup target add x86_64-unknown-linux-musl
+      - name: Build & Test
+        run: |
+          cargo build --release
+          cargo test --release
+      - name: Upload Assets
+        run: |
+          ./.github/workflows/upload_asset.sh ./target/x86_64-unknown-linux-musl/release/sketch $GITHUB_TOKEN
