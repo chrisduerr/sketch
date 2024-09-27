@@ -56,6 +56,9 @@ struct Sketch {
     /// Whether the Sketch was successfully saved to a file.
     persisted: bool,
 
+    /// Whether the output path was changed at runtime.
+    output_modified: bool,
+
     /// Whether there's currently text being pasted.
     pasting: bool,
 
@@ -68,6 +71,7 @@ impl Sketch {
     fn new() -> Self {
         Self {
             options: Options::parse(),
+            output_modified: Default::default(),
             max_revision: Default::default(),
             text_cursor: Default::default(),
             fill_queue: Default::default(),
@@ -439,12 +443,12 @@ impl Sketch {
     }
 
     /// Open the dialog for picking the save path.
-    fn open_save_dialog(&mut self, terminal: &mut Terminal, error: bool) {
+    fn open_save_dialog(&mut self, terminal: &mut Terminal, error: bool, shutdown: bool) {
         let path = match &self.options.output {
             Some(path) => path.to_string_lossy().into(),
             None => String::new(),
         };
-        self.mode = SketchMode::SaveDialog(SaveDialog::new(path, error));
+        self.mode = SketchMode::SaveDialog(SaveDialog::new(path, error, shutdown));
 
         // Redraw the entire terminal to clear previous dialogs.
         self.redraw(terminal);
@@ -685,20 +689,31 @@ impl EventHandler for Sketch {
             },
             SketchMode::SaveDialog(dialog) => match glyph {
                 '\n' => {
+                    let should_shutdown = dialog.shutdown_on_save();
+
                     // Check if a path was submitted.
                     let path = match dialog.path() {
                         Some(path) => path,
-                        None => {
+                        None if should_shutdown => {
                             terminal.shutdown();
+                            return;
+                        },
+                        None => {
+                            dialog.mark_failed(terminal);
                             return;
                         },
                     };
 
                     // Attempt to persist the path.
                     match self.content.persist(&path) {
-                        Ok(()) => {
+                        Ok(()) if should_shutdown => {
                             self.persisted = true;
                             terminal.shutdown();
+                        },
+                        Ok(()) => {
+                            self.options.output = Some(path);
+                            self.output_modified = true;
+                            self.close_dialog(terminal);
                         },
                         Err(_) => dialog.mark_failed(terminal),
                     }
@@ -720,10 +735,12 @@ impl EventHandler for Sketch {
                 '\x06' => self.open_color_dialog(terminal, ColorPosition::Foreground),
                 // Perform flood fill at cursor location.
                 '\x05' => self.fill(),
-                // Toggle through text styles on ^S.
-                '\x13' => self.toggle_text_style(),
-                // Open brush character dialog on ^T.
-                '\x14' => self.open_brush_character_dialog(terminal),
+                // Open brush character dialog on ^G.
+                '\x07' => self.open_brush_character_dialog(terminal),
+                // Open save dialog on ^S.
+                '\x13' => self.open_save_dialog(terminal, false, false),
+                // Toggle through text styles on ^T.
+                '\x14' => self.toggle_text_style(),
                 // Open help dialog on ^?.
                 '\x1f' => self.open_help_dialog(terminal),
                 // Delete last character on backspace.
@@ -945,14 +962,14 @@ impl EventHandler for Sketch {
         }
 
         match &self.options.output {
-            Some(path) => match self.content.persist(path) {
+            Some(path) if !self.output_modified => match self.content.persist(path) {
                 Ok(()) => {
                     self.persisted = true;
                     terminal.shutdown();
                 },
-                Err(_) => self.open_save_dialog(terminal, true),
+                Err(_) => self.open_save_dialog(terminal, true, true),
             },
-            None => self.open_save_dialog(terminal, false),
+            _ => self.open_save_dialog(terminal, false, true),
         }
     }
 
