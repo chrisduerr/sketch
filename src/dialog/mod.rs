@@ -1,6 +1,6 @@
 use unicode_width::UnicodeWidthStr;
 
-use crate::terminal::{Color, CursorShape, Terminal, TerminalMode};
+use crate::terminal::{Color, CursorShape, EscapeStripper, Terminal, TerminalMode};
 
 pub mod brush_character;
 pub mod colorpicker;
@@ -18,30 +18,31 @@ pub trait Dialog {
     /// Cursor position relative to the top left corner of the dialog content.
     ///
     /// If this is `None`, the cursor will not be visible in the dialog.
-    fn cursor_position(&self, _lines: &[String]) -> Option<(usize, usize)> {
+    fn cursor_position(&self, _lines: &[DialogLine]) -> Option<(usize, usize)> {
         None
     }
 
     /// Render the dialog to the terminal.
     fn render(&self, terminal: &mut Terminal) {
-        let lines = self.lines();
+        // Get all dialog lines and their escape stripped equivalent.
+        let lines: Vec<_> = self.lines().into_iter().map(DialogLine::from).collect();
 
         let max_width = lines.iter().map(|line| line.width()).max().unwrap_or(0) + 4;
         let column = (terminal.dimensions.columns as usize - max_width) / 2;
-        let mut line = (terminal.dimensions.lines as usize - 5) / 2;
+        let mut line_index = (terminal.dimensions.lines as usize - 5) / 2;
 
         // Setup the colored box drawing characters.
         let box_color = self.box_color();
         Terminal::set_color(box_color.0, box_color.1);
 
         // Write the top of the dialog box.
-        Terminal::goto(column, line);
+        Terminal::goto(column, line_index);
         Terminal::write(format!("┌{}┐", "─".repeat(max_width - 2)));
-        line += 1;
+        line_index += 1;
 
         // Write the dialog text.
-        for text in &lines {
-            Terminal::goto(column, line);
+        for line in &lines {
+            Terminal::goto(column, line_index);
 
             // Write a colored box drawing character.
             Terminal::set_color(box_color.0, box_color.1);
@@ -49,18 +50,18 @@ pub trait Dialog {
 
             // Write the text itself without colors.
             Terminal::set_color(Color::default(), Color::default());
-            let padding = " ".repeat(max_width - text.width() - 4);
-            Terminal::write(format!(" {}{} ", text, padding));
+            let padding = " ".repeat(max_width - line.width() - 4);
+            Terminal::write(format!(" {}{} ", line.original, padding));
 
             // Write a colored box drawing character.
             Terminal::set_color(box_color.0, box_color.1);
             Terminal::write("│");
 
-            line += 1;
+            line_index += 1;
         }
 
         // Write the bottom of the dialog box.
-        Terminal::goto(column, line);
+        Terminal::goto(column, line_index);
         Terminal::write(format!("└{}┘", "─".repeat(max_width - 2)));
 
         let (cursor_column, cursor_line) = match self.cursor_position(&lines) {
@@ -76,6 +77,26 @@ pub trait Dialog {
         Terminal::set_cursor_shape(CursorShape::Underline);
 
         // Always put the cursor at the last cell in the first line.
-        Terminal::goto(column + 2 + cursor_column, line - lines.len() + cursor_line);
+        Terminal::goto(column + 2 + cursor_column, line_index - lines.len() + cursor_line);
+    }
+}
+
+/// Line of text in the dialog.
+pub struct DialogLine {
+    pub original: String,
+    pub stripped: String,
+}
+
+impl From<String> for DialogLine {
+    fn from(original: String) -> Self {
+        let stripped = original.strip();
+        Self { original, stripped }
+    }
+}
+
+impl DialogLine {
+    /// Get the display width of the line.
+    pub fn width(&self) -> usize {
+        self.stripped.width()
     }
 }

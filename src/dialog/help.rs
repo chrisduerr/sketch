@@ -14,19 +14,19 @@ impl HelpDialog {
 impl Dialog for HelpDialog {
     fn lines(&self) -> Vec<String> {
         vec![
-            String::from("MOUSE WHEEL        Change brush size"),
-            String::from("CTRL + LMB         Start box drawing"),
-            String::from("CTRL + DRAG LMB    Assisted line drawing"),
-            String::from("CTRL + G           Open brush grapheme dialog"),
-            String::from("CTRL + F           Open foreground color dialog"),
-            String::from("CTRL + B           Open background color dialog"),
-            String::from("CTRL + E           Fill empty areas from the brush position"),
-            String::from("CTRL + T           Toggle through text styles"),
-            String::from("CTRL + S           Open save dialog"),
-            String::from("CTRL + U           Undo last action"),
-            String::from("CTRL + R           Redo last undone action"),
-            String::from("CTRL + L           Reset the canvas"),
-            String::from("CTRL + C           Exit"),
+            String::from("MOUSE WHEEL        Change \x1b[32mbrush size\x1b[39m"),
+            String::from("CTRL + LMB         Start \x1b[32mbox drawing\x1b[39m"),
+            String::from("CTRL + DRAG LMB    Assisted \x1b[32mline drawing\x1b[39m"),
+            String::from("CTRL + G           Open brush \x1b[32mgrapheme\x1b[39m dialog"),
+            String::from("CTRL + F           Open \x1b[32mforeground color\x1b[39m dialog"),
+            String::from("CTRL + B           Open \x1b[32mbackground color\x1b[39m dialog"),
+            String::from("CTRL + E           \x1b[32mFill\x1b[39m at brush position"),
+            String::from("CTRL + T           Toggle through \x1b[32mtext styles\x1b[39m"),
+            String::from("CTRL + S           Open \x1b[32msave\x1b[39m dialog"),
+            String::from("CTRL + U           \x1b[32mUndo\x1b[39m last action"),
+            String::from("CTRL + R           \x1b[32mRedo\x1b[39m last undone action"),
+            String::from("CTRL + L           \x1b[32mReset\x1b[39m the canvas"),
+            String::from("CTRL + C           \x1b[32mExit\x1b[39m"),
         ]
     }
 }

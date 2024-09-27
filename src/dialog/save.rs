@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::dialog::Dialog;
+use crate::dialog::{Dialog, DialogLine};
 use crate::terminal::{Color, NamedColor, Terminal};
 
 /// Message prompt of the save dialog.
@@ -100,7 +100,7 @@ impl Dialog for SaveDialog {
         vec![self.prompt().into(), self.path.clone()]
     }
 
-    fn cursor_position(&self, lines: &[String]) -> Option<(usize, usize)> {
+    fn cursor_position(&self, lines: &[DialogLine]) -> Option<(usize, usize)> {
         Some((lines.get(1).map(|line| line.width()).unwrap_or_default(), 1))
     }
 

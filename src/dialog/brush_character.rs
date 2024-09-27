@@ -1,6 +1,6 @@
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
-use crate::dialog::Dialog;
+use crate::dialog::{Dialog, DialogLine};
 use crate::terminal::Terminal;
 
 /// Message prompt of the brush character picker dialog.
@@ -46,7 +46,7 @@ impl Dialog for BrushCharacterDialog {
         vec![format!("{}{}", BRUSH_CHARACTER_DIALOG_PROMPT, self.glyph)]
     }
 
-    fn cursor_position(&self, lines: &[String]) -> Option<(usize, usize)> {
+    fn cursor_position(&self, lines: &[DialogLine]) -> Option<(usize, usize)> {
         Some((lines.first().map(|line| line.width()).unwrap_or_default() - 1, 0))
     }
 }

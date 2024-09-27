@@ -524,3 +524,37 @@ impl Default for TextStyle {
         TextStyle::empty()
     }
 }
+
+/// Helper trait to implement escape stripping on STD strings.
+pub trait EscapeStripper {
+    /// Remove all escape sequences.
+    fn strip(&self) -> String;
+}
+
+impl<B: AsRef<[u8]>> EscapeStripper for B {
+    fn strip(&self) -> String {
+        // Dummy struct for handling the `Perform` trait.
+        struct Stripped {
+            text: String,
+        }
+
+        // Append dispatched plain-text to internal storage.
+        impl Perform for Stripped {
+            fn print(&mut self, c: char) {
+                self.text.push(c);
+            }
+        }
+
+        // Use input length as size estimate.
+        let bytes = self.as_ref();
+        let mut stripped = Stripped { text: String::with_capacity(bytes.len()) };
+
+        // Parse all bytes.
+        let mut parser = Parser::new();
+        for byte in bytes {
+            parser.advance(&mut stripped, *byte);
+        }
+
+        stripped.text
+    }
+}
