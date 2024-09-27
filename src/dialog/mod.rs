@@ -5,6 +5,7 @@ use crate::terminal::{Color, CursorShape, EscapeStripper, Terminal, TerminalMode
 pub mod brush_character;
 pub mod colorpicker;
 pub mod help;
+pub mod open;
 pub mod save;
 
 pub trait Dialog {

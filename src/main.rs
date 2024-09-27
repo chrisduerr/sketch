@@ -1,8 +1,4 @@
-mod cli;
-mod dialog;
-mod terminal;
-
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
@@ -10,17 +6,25 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::{fs, io, mem};
 
-use clap::Parser;
+use clap::Parser as _;
 use unicode_width::UnicodeWidthChar;
+use vte::Parser;
 
 use crate::cli::Options;
 use crate::dialog::brush_character::BrushCharacterDialog;
 use crate::dialog::colorpicker::{ColorPosition, ColorpickerDialog};
 use crate::dialog::help::HelpDialog;
+use crate::dialog::open::OpenDialog;
 use crate::dialog::save::SaveDialog;
 use crate::dialog::Dialog;
+use crate::import::SketchParser;
 use crate::terminal::event::{ButtonState, EventHandler, Modifiers, MouseButton, MouseEvent};
 use crate::terminal::{Color, CursorShape, Dimensions, Terminal, TerminalMode, TextStyle};
+
+mod cli;
+mod dialog;
+mod import;
+mod terminal;
 
 /// Help dialog binding information.
 const HELP: &str = "[CTRL + ?] Help";
@@ -101,6 +105,13 @@ impl Sketch {
         // Resize internal buffer to fit terminal dimensions.
         let dimensions = terminal.dimensions();
         self.resize(&mut terminal, dimensions);
+
+        // Import sketch file passed as CLI argument.
+        if let Some(sketch) =
+            self.options.file.as_ref().and_then(|path| fs::read_to_string(path).ok())
+        {
+            self.load(&mut terminal, &sketch, true);
+        }
 
         // Run the terminal event loop.
         terminal.set_event_handler(Box::new(self));
@@ -454,6 +465,14 @@ impl Sketch {
         self.redraw(terminal);
     }
 
+    /// Open the dialog for importing sketches.
+    fn open_open_dialog(&mut self, terminal: &mut Terminal) {
+        self.mode = SketchMode::OpenDialog(OpenDialog::new());
+
+        // Redraw the entire terminal to clear previous dialogs.
+        self.redraw(terminal);
+    }
+
     /// Open the dialog for showing keybarding and usage information.
     fn open_help_dialog(&mut self, terminal: &mut Terminal) {
         let dialog = HelpDialog::new();
@@ -606,6 +625,89 @@ impl Sketch {
         self.bump_revision();
     }
 
+    /// Load sketch into canvas.
+    fn load(&mut self, terminal: &mut Terminal, sketch: &str, center_grid: bool) {
+        let origin = self.brush.position;
+        let mut sketch_parser = SketchParser::new(self, origin);
+        let mut parser = Parser::new();
+
+        for byte in sketch.as_bytes() {
+            parser.advance(&mut sketch_parser, *byte);
+        }
+
+        // Center grid after import from CLI.
+        if center_grid {
+            self.center(terminal);
+        }
+
+        self.bump_revision();
+    }
+
+    /// Center the current sketch within the grid.
+    fn center(&mut self, terminal: &mut Terminal) {
+        let mut min_start_index = usize::MAX;
+        let mut max_end_index = usize::MIN;
+        let mut first_line = usize::MAX;
+        let mut last_line = usize::MIN;
+
+        // Find boundaries of the sketch.
+        for (line, line_content) in self.content.iter().enumerate() {
+            let mut first_changed = usize::MAX;
+            let mut last_changed = usize::MIN;
+
+            // Find boundaries for each line.
+            for (column, cell) in line_content.iter().enumerate() {
+                if !cell.is_empty() {
+                    if first_changed == usize::MAX {
+                        first_changed = column;
+                    }
+                    last_changed = column;
+                }
+            }
+
+            // Update global column limits.
+            min_start_index = min(first_changed, min_start_index);
+            max_end_index = max(last_changed, max_end_index);
+
+            // Update line limits
+            if first_changed != usize::MAX {
+                if first_line == usize::MAX {
+                    first_line = line;
+                }
+                last_line = line;
+            }
+        }
+
+        // Skip centering if entire grid was empty.
+        if first_line == usize::MAX {
+            return;
+        }
+
+        // Center sketch horizontally.
+        let sketch_width = max_end_index - min_start_index + 1;
+        let padding_columns = (self.content[0].len() - sketch_width) / 2;
+        for i in first_line..=last_line {
+            match padding_columns.cmp(&min_start_index) {
+                Ordering::Greater => {
+                    self.content[i].rotate_right(padding_columns - min_start_index)
+                },
+                Ordering::Less => self.content[i].rotate_left(min_start_index - padding_columns),
+                Ordering::Equal => (),
+            }
+        }
+
+        // Center sketch vertically.
+        let sketch_height = last_line - first_line;
+        let padding_lines = (self.content.len() - sketch_height) / 2;
+        match padding_lines.cmp(&first_line) {
+            Ordering::Greater => self.content.rotate_right(padding_lines - first_line),
+            Ordering::Less => self.content.rotate_left(first_line - padding_lines),
+            Ordering::Equal => (),
+        }
+
+        self.redraw(terminal);
+    }
+
     /// Calculate the combination of two line drawing characters.
     ///
     /// If either character is not a line drawing character, the new
@@ -663,6 +765,7 @@ impl EventHandler for Sketch {
             SketchMode::BrushCharacterDialog(_)
             | SketchMode::ColorpickerDialog(_)
             | SketchMode::SaveDialog(_)
+            | SketchMode::OpenDialog(_)
             | SketchMode::HelpDialog(_)
                 if glyph == '\x1b' =>
             {
@@ -725,6 +828,38 @@ impl EventHandler for Sketch {
                     }
                 },
             },
+            SketchMode::OpenDialog(dialog) => match glyph {
+                '\n' => {
+                    // Ensure dialog path is valid.
+                    let path = match dialog.path() {
+                        Some(path) if path.exists() => path,
+                        _ => {
+                            dialog.mark_failed(terminal);
+                            return;
+                        },
+                    };
+
+                    // Ensure we can read the sketch.
+                    let sketch = match fs::read_to_string(path) {
+                        Ok(sketch) => sketch,
+                        Err(_) => {
+                            dialog.mark_failed(terminal);
+                            return;
+                        },
+                    };
+
+                    // Load sketch into canvas.
+                    self.load(terminal, &sketch, false);
+
+                    self.close_dialog(terminal);
+                },
+                glyph => {
+                    let redraw_required = dialog.keyboard_input(terminal, glyph);
+                    if redraw_required {
+                        self.redraw(terminal);
+                    }
+                },
+            },
             SketchMode::HelpDialog(_) if glyph == '\n' => self.close_dialog(terminal),
             // Cancel box/line drawing on escape.
             SketchMode::LineDrawing(..) if glyph == '\x1b' => self.mode = SketchMode::Sketching,
@@ -741,6 +876,8 @@ impl EventHandler for Sketch {
                 '\x13' => self.open_save_dialog(terminal, false, false),
                 // Toggle through text styles on ^T.
                 '\x14' => self.toggle_text_style(),
+                // Open import dialog on ^O.
+                '\x0f' => self.open_open_dialog(terminal),
                 // Open help dialog on ^?.
                 '\x1f' => self.open_help_dialog(terminal),
                 // Delete last character on backspace.
@@ -787,6 +924,7 @@ impl EventHandler for Sketch {
 
         // Ignore mouse events while dialogs are open.
         if let SketchMode::SaveDialog(_)
+        | SketchMode::OpenDialog(_)
         | SketchMode::HelpDialog(_)
         | SketchMode::BrushCharacterDialog(_)
         | SketchMode::ColorpickerDialog(_) = self.mode
@@ -940,6 +1078,7 @@ impl EventHandler for Sketch {
             SketchMode::BrushCharacterDialog(dialog) => dialog.render(terminal),
             SketchMode::ColorpickerDialog(dialog) => dialog.render(terminal),
             SketchMode::SaveDialog(dialog) => dialog.render(terminal),
+            SketchMode::OpenDialog(dialog) => dialog.render(terminal),
             SketchMode::HelpDialog(dialog) => dialog.render(terminal),
             _ => (),
         }
@@ -1277,6 +1416,8 @@ enum SketchMode {
     ColorpickerDialog(ColorpickerDialog),
     /// Save dialog.
     SaveDialog(SaveDialog),
+    /// Import dialog.
+    OpenDialog(OpenDialog),
     /// Help dialog.
     HelpDialog(HelpDialog),
 }

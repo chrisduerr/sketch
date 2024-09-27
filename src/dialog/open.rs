@@ -5,22 +5,20 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::dialog::{Dialog, DialogLine};
 use crate::terminal::{Color, NamedColor, Terminal};
 
-/// Message prompt of the save dialog.
-const SAVE_DIALOG_SHUTDOWN_PROMPT: &str = "Output path (leave empty for stdout):";
-const SAVE_DIALOG_PROMPT: &str = "Output path:";
+/// Message prompt of the open dialog.
+const OPEN_DIALOG_PROMPT: &str = "Sketch path:";
 
-/// Dialog for saving the sketch.
-#[derive(PartialEq, Eq)]
-pub struct SaveDialog {
+/// Dialog for loading sketches.
+#[derive(Default, PartialEq, Eq)]
+pub struct OpenDialog {
     path: String,
     error: bool,
-    shutdown: bool,
 }
 
-impl SaveDialog {
-    /// Create a new save dialog.
-    pub fn new(path: String, error: bool, shutdown: bool) -> Self {
-        Self { path, error, shutdown }
+impl OpenDialog {
+    /// Create a new import dialog.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Process a keystroke.
@@ -41,7 +39,7 @@ impl SaveDialog {
                 let _ = self.path.pop();
 
                 // Redraw everything if backspace caused dialog to shrink.
-                if self.path.width() + 1 > self.prompt().len() {
+                if self.path.width() + 1 > OPEN_DIALOG_PROMPT.len() {
                     return true;
                 }
             },
@@ -53,7 +51,7 @@ impl SaveDialog {
         false
     }
 
-    /// The selected save path.
+    /// The selected import path.
     pub fn path(&self) -> Option<PathBuf> {
         // Ignore paths that are empty or only whitespace.
         let path = self.path.trim();
@@ -79,25 +77,11 @@ impl SaveDialog {
         self.error = true;
         self.render(terminal);
     }
-
-    /// Whether Sketch should terminate after successfully saving.
-    pub fn shutdown_on_save(&self) -> bool {
-        self.shutdown
-    }
-
-    /// Dialog prompt.
-    fn prompt(&self) -> &str {
-        if self.shutdown {
-            SAVE_DIALOG_SHUTDOWN_PROMPT
-        } else {
-            SAVE_DIALOG_PROMPT
-        }
-    }
 }
 
-impl Dialog for SaveDialog {
+impl Dialog for OpenDialog {
     fn lines(&self) -> Vec<String> {
-        vec![self.prompt().into(), self.path.clone()]
+        vec![OPEN_DIALOG_PROMPT.into(), self.path.clone()]
     }
 
     fn cursor_position(&self, lines: &[DialogLine]) -> Option<(usize, usize)> {

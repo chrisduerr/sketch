@@ -200,8 +200,18 @@ impl Terminal {
 
     /// Set the color for all following characters.
     pub fn set_color(foreground: Color, background: Color) {
-        Self::write(foreground.escape(true));
-        Self::write(background.escape(false));
+        Self::set_foreground(foreground);
+        Self::set_background(background);
+    }
+
+    /// Set foreground color for all following characters.
+    pub fn set_foreground(color: Color) {
+        Self::write(color.escape(true));
+    }
+
+    /// Set background color for all following characters.
+    pub fn set_background(color: Color) {
+        Self::write(color.escape(false));
     }
 
     /// Clear the terminal screen.

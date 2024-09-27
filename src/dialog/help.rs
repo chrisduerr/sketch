@@ -23,6 +23,7 @@ impl Dialog for HelpDialog {
             String::from("CTRL + E           \x1b[32mfill\x1b[39m at brush position"),
             String::from("CTRL + T           \x1b[32mtext styles\x1b[39m toggle"),
             String::from("CTRL + S           \x1b[32msave\x1b[39m sketch"),
+            String::from("CTRL + O           \x1b[32mopen\x1b[39m existing sketch"),
             String::from("CTRL + U           \x1b[32mundo\x1b[39m last action"),
             String::from("CTRL + R           \x1b[32mredo\x1b[39m last undone action"),
             String::from("CTRL + L           \x1b[32mreset\x1b[39m the canvas"),

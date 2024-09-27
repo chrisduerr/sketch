@@ -5,7 +5,10 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, about, version)]
 pub struct Options {
-    /// output file
+    /// Existing sketch file.
+    #[clap(short, long)]
+    pub file: Option<PathBuf>,
+    /// Output file.
     #[clap(short, long)]
     pub output: Option<PathBuf>,
 }
