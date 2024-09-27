@@ -1,6 +1,6 @@
 [package]
 name = "sketch"
-version = "1.0.0"
+version = "1.1.0"
 description = "Terminal painting program"
 authors = ["Christian Duerr <contact@christianduerr.com>"]
 repository = "https://github.com/chrisduerr/sketch"
