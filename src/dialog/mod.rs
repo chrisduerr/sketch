@@ -36,13 +36,13 @@ pub trait Dialog {
         Terminal::set_color(box_color.0, box_color.1);
 
         // Write the top of the dialog box.
-        Terminal::goto(column, line_index);
+        Terminal::goto(column + 1, line_index + 1);
         Terminal::write(format!("┌{}┐", "─".repeat(max_width - 2)));
         line_index += 1;
 
         // Write the dialog text.
         for line in &lines {
-            Terminal::goto(column, line_index);
+            Terminal::goto(column + 1, line_index + 1);
 
             // Write a colored box drawing character.
             Terminal::set_color(box_color.0, box_color.1);
@@ -61,7 +61,7 @@ pub trait Dialog {
         }
 
         // Write the bottom of the dialog box.
-        Terminal::goto(column, line_index);
+        Terminal::goto(column + 1, line_index + 1);
         Terminal::write(format!("└{}┘", "─".repeat(max_width - 2)));
 
         let (cursor_column, cursor_line) = match self.cursor_position(&lines) {
@@ -77,7 +77,7 @@ pub trait Dialog {
         Terminal::set_cursor_shape(CursorShape::Underline);
 
         // Always put the cursor at the last cell in the first line.
-        Terminal::goto(column + 2 + cursor_column, line_index - lines.len() + cursor_line);
+        Terminal::goto(column + 2 + cursor_column + 1, line_index - lines.len() + cursor_line + 1);
     }
 }
 
